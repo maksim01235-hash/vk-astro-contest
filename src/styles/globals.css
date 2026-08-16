@@ -1,0 +1,65 @@
+/**
+ * styles/globals.css — глобальные стили + Tailwind + шрифт Inter.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-light: #dbeafe;
+  --bg: #f8fafc;
+    --surface: #ffffff;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+  }
+
+  html,
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Плавные переходы для всех интерактивных элементов. */
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    @apply transition-all duration-200;
+  }
+}
+
+@layer components {
+  /* Карточка с тенью (используется в списках). */
+  .card-surface {
+    @apply bg-white rounded-2xl shadow-sm border border-slate-200 p-5;
+  }
+
+  /* Акцентная кнопка. */
+  .btn-primary {
+    @apply bg-accent text-white font-medium rounded-xl px-5 py-3 hover:bg-accent-hover
+      active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Вторичная кнопка. */
+  .btn-secondary {
+    @apply bg-white text-slate-700 font-medium rounded-xl px-5 py-3 border border-slate-300
+      hover:bg-slate-50 active:scale-95;
+  }
+
+  /* Поле ввода. */
+  .input-field {
+    @apply w-full bg-white border border-slate-300 rounded-xl px-4 py-3 text-slate-900
+      placeholder-slate-400 focus:border-accent focus:ring-2 focus:ring-accent-light
+      outline-none;
+  }
+}

@@ -1,0 +1,83 @@
+# ============================================================
+# GitHub Actions: автоматический деплой на GitHub Pages.
+# ============================================================
+# Что делает:
+#  1. При пуше в ветку main собирает Next.js (static export).
+#  2. Заливает папку out/ в ветку gh-pages.
+#  3. GitHub Pages автоматически публикует сайт.
+#
+# НАСТРОЙКА:
+#  1. Создайте репозиторий на GitHub и запушьте код.
+#  2. В репозитории: Settings → Pages → Source = "GitHub Actions".
+#  3. В Settings → Secrets and variables → Actions добавьте секреты:
+#     - NEXT_PUBLIC_SHEETS_API_URL — URL вашего Apps Script.
+#     - NEXT_PUBLIC_ADMIN_PASSWORD_HASH — SHA-256-хеш пароля админки.
+#     - NEXT_PUBLIC_BASE_PATH — путь репозитория (например, /vk-contest-mini-app).
+#     - NEXT_PUBLIC_PREBUILD_CARD_IDS — ID карточек через запятую (1,2,3).
+#     - NEXT_PUBLIC_MOCK_MODE — false (для продакшна).
+#  4. При пуше в main — автоматически соберётся и опубликуется.
+# ============================================================
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Разрешаем только один параллельный деплой.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Next.js (static export)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SHEETS_API_URL: ${{ secrets.NEXT_PUBLIC_SHEETS_API_URL }}
+          NEXT_PUBLIC_ADMIN_PASSWORD_HASH: ${{ secrets.NEXT_PUBLIC_ADMIN_PASSWORD_HASH }}
+          NEXT_PUBLIC_BASE_PATH: ${{ secrets.NEXT_PUBLIC_BASE_PATH }}
+          NEXT_PUBLIC_PREBUILD_CARD_IDS: ${{ secrets.NEXT_PUBLIC_PREBUILD_CARD_IDS }}
+          NEXT_PUBLIC_MOCK_MODE: ${{ secrets.NEXT_PUBLIC_MOCK_MODE }}
+
+      - name: Add .nojekyll (для GitHub Pages)
+        run: touch out/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
