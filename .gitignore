@@ -1,3 +1,5 @@
+.env.local
+
 # Зависимости
 node_modules/
 .pnp
