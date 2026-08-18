@@ -1,12 +1,8 @@
 /**
- * app/admin/stats/page.tsx — страница статистики с графиками (Recharts).
+ * app/admin/stats/page.tsx — страница статистики.
  *
- * Графики:
- *  1. Процент ответивших по каждой карточке (BarChart).
- *  2. Средняя delta (время решения) по карточкам (BarChart).
- *  3. Процент репостов (PieChart).
- *
- * Защита: та же, что и в /admin (проверка sessionStorage).
+ * Обновления (v2):
+ *  - Добавлено число подписавшихся (subscribed_count).
  */
 
 'use client';
@@ -39,6 +35,7 @@ export default function StatsPage() {
   const [authed, setAuthed] = useState(false);
   const [stats, setStats] = useState<CardStat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [subscribedCount, setSubscribedCount] = useState(0);
   const toast = useToast();
 
   useEffect(() => {
@@ -52,6 +49,9 @@ export default function StatsPage() {
       try {
         const data = await sheetsApi.getStats();
         setStats(data);
+        if (data.length > 0) {
+          setSubscribedCount(data[0].subscribed_count);
+        }
       } catch (e) {
         toast.error('Не удалось загрузить статистику');
       } finally {
@@ -64,12 +64,8 @@ export default function StatsPage() {
     return (
       <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
         <div className="card-surface max-w-md text-center">
-          <p className="text-slate-600 mb-4">
-            Доступно только из админ-панели.
-          </p>
-          <Link href="/admin" className="btn-primary">
-            Войти в админку
-          </Link>
+          <p className="text-slate-600 mb-4">Доступно только из админ-панели.</p>
+          <Link href="/admin" className="btn-primary">Войти в админку</Link>
         </div>
       </div>
     );
@@ -94,7 +90,6 @@ export default function StatsPage() {
     );
   }
 
-  // Данные для графика "процент ответивших".
   const pctData = stats.map((s) => ({
     name: s.title.slice(0, 20),
     'Процент (%)': s.pct_answered,
@@ -119,16 +114,20 @@ export default function StatsPage() {
     <div className="animate-fade-in">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Статистика</h1>
-        <Link href="/admin" className="btn-secondary text-sm">
-          ← К конструктору
-        </Link>
+        <Link href="/admin" className="btn-secondary text-sm">← К конструктору</Link>
       </div>
 
-      {/* График: процент ответивших. */}
+      {/* Число подписавшихся */}
       <div className="card-surface mb-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">
-          Процент ответивших (от числа пользователей, %)
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">
+          Подписавшиеся на уведомления
         </h3>
+        <p className="text-3xl font-bold text-accent">{subscribedCount}</p>
+      </div>
+
+      {/* График: процент ответивших */}
+      <div className="card-surface mb-4">
+        <h3 className="text-sm font-semibold text-slate-700 mb-4">Процент ответивших (от числа пользователей, %)</h3>
         <ResponsiveContainer width="100%" height={250}>
           <BarChart data={pctData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -140,11 +139,9 @@ export default function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* График: количество ответов. */}
+      {/* График: количество ответов */}
       <div className="card-surface mb-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">
-          Количество ответов по карточкам
-        </h3>
+        <h3 className="text-sm font-semibold text-slate-700 mb-4">Количество ответов по карточкам</h3>
         <ResponsiveContainer width="100%" height={250}>
           <BarChart data={answersData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -156,11 +153,9 @@ export default function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* График: средняя delta. */}
+      {/* График: средняя delta */}
       <div className="card-surface mb-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">
-          Среднее время решения (секунды)
-        </h3>
+        <h3 className="text-sm font-semibold text-slate-700 mb-4">Среднее время решения (секунды)</h3>
         <ResponsiveContainer width="100%" height={250}>
           <BarChart data={deltaData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -172,11 +167,9 @@ export default function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* График: репосты (Pie). */}
+      {/* График: репосты */}
       <div className="card-surface">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">
-          Репосты по карточкам
-        </h3>
+        <h3 className="text-sm font-semibold text-slate-700 mb-4">Репосты по карточкам</h3>
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
             <Pie

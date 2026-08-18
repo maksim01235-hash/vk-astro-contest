@@ -1,22 +1,18 @@
 /**
  * lib/hooks/useAuth.ts — хук авторизации пользователя.
  *
- * Логика:
- *  1. При монтировании пытаемся получить VK-пользователя (VK Bridge).
- *  2. Если есть — проверяем в Google Sheets (checkUser). Если новый — автосоздание.
- *  3. Если данных нет — показываем кнопку "Авторизоваться через VK".
- *  4. Сохраняем в Zustand store + localStorage.
+ * Исправления (август 2026):
+ *  - Защита от параллельных/повторных autoAuth, чтобы checkUser не уходил 2–3 раза.
+ *  - initBridge и hydrate выполняются в Providers.tsx, а не здесь.
  */
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useUserStore } from '@/lib/store/userStore';
-import { getUserInfo, initBridge } from '@/lib/vk/bridge';
+import { getUserInfo } from '@/lib/vk/bridge';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
-import { MOCK_MODE } from '@/constants';
-import type { VKUserInfo, UserRecord } from '@/types';
 
 export function useAuth() {
   const {
@@ -27,45 +23,56 @@ export function useAuth() {
     setVkUser,
     setUserRecord,
     setLoading,
-    hydrate,
   } = useUserStore();
   const [error, setError] = useState<string | null>(null);
 
-  /** Инициализация при монтировании. */
-  useEffect(() => {
-    hydrate();
-    initBridge();
-    // В mock-режиме сразу отдаём тестового пользователя.
-    if (MOCK_MODE && !isAuthed) {
-      autoAuth();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * Защита от одновременных повторных запусков авторизации.
+   * Нужна в том числе из-за React Strict Mode в режиме разработки.
+   */
+  const authInProgressRef = useRef(false);
 
-  /** Автоматическая авторизация (пытаемся получить VK-пользователя тихо). */
+  /**
+   * Получить пользователя из VK Bridge и проверить/создать его в Sheets.
+   * Один вызов login = максимум один запрос checkUser.
+   */
   const autoAuth = useCallback(async () => {
+    // Не запускаем ещё одну цепочку, пока текущая не завершилась.
+    if (authInProgressRef.current) return;
+
+    // Если пользователь и запись из Sheets уже есть, повторный запрос не нужен.
+    const state = useUserStore.getState();
+    if (state.vkUser && state.userRecord) return;
+
+    authInProgressRef.current = true;
     setLoading(true);
     setError(null);
+
     try {
       const user = await getUserInfo();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+      if (!user) return;
+
+      // Записываем пользователя сразу: дальнейшие попытки уже увидят vkUser.
       setVkUser(user);
       await logEvent('auth_success', { vk_id: user.id });
-      // Проверяем/создаём в Sheets, передаём имя из VK для сохранения.
-      const record = await sheetsApi.checkUser(user.id, user.name || `${user.first_name} ${user.last_name}`.trim());
+
+      // Запрашиваем запись пользователя в Sheets ровно один раз.
+      const record = await sheetsApi.checkUser(
+        user.id,
+        user.name || `${user.first_name} ${user.last_name}`.trim(),
+      );
       setUserRecord(record);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Ошибка авторизации';
       setError(msg);
       await logEvent('auth_fail', { error: msg });
     } finally {
+      authInProgressRef.current = false;
       setLoading(false);
     }
   }, [setVkUser, setUserRecord, setLoading]);
 
-  /** Ручная авторизация (по кнопке). */
+  /** Ручная авторизация по кнопке. */
   const login = useCallback(async () => {
     await autoAuth();
   }, [autoAuth]);

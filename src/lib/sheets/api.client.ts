@@ -1,10 +1,8 @@
 /**
  * lib/sheets/api.client.ts — клиент Google Apps Script REST API.
  *
- * Обновления (август 2026):
- *  - Добавлен метод getCardsList() для лёгкого списка карточек.
- *  - saveAnswer/saveFeedback принимают log (массив LogRecord) и передают его на сервер.
- *  - Удалены saveLog/saveLogsBatch как отдельные методы (логи теперь отправляются только вместе с ответом/фидбэком).
+ * Обновления (v2):
+ *  - saveFeedback: принимает log (массив LogRecord).
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
@@ -76,10 +74,6 @@ export const sheetsApi = {
     return result.data || [];
   },
 
-  /**
-   * Новый метод: лёгкий список карточек (card_id, title, is_active).
-   * Используется в админке для селектора карточек.
-   */
   async getCardsList(): Promise<Array<{ card_id: string; title: string; is_active: boolean }>> {
     const response = await withRetry(() =>
       client.get('', { params: { action: API_ACTIONS.GET_CARDS_LIST } }),
@@ -113,18 +107,10 @@ export const sheetsApi = {
     await post(API_ACTIONS.SAVE_USER, user);
   },
 
-  /**
-   * Сохранение ответа пользователя.
-   * @param answer — объект ответа, включая log (массив LogRecord, опционально).
-   */
   async saveAnswer(answer: AnswerRecord & { log?: LogRecord[] }): Promise<void> {
     await post(API_ACTIONS.SAVE_ANSWER, answer);
   },
 
-  /**
-   * Сохранение обратной связи.
-   * @param feedback — объект фидбэка, включая log (массив LogRecord, опционально).
-   */
   async saveFeedback(feedback: {
     card_id: string;
     name: string;

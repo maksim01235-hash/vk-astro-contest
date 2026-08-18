@@ -1,7 +1,8 @@
 /**
  * components/common/Providers.tsx — клиентский провайдер.
- * Инициализирует VK Bridge, Zustand hydrate, Toast, NotificationModal,
- * оффлайн-синхронизацию ответов при восстановлении сети.
+ *
+ * Инициализирует VK Bridge и Zustand hydrate ровно один раз,
+ * показывает Toast/NotificationModal, синхронизирует офлайн-очередь.
  */
 
 'use client';
@@ -24,6 +25,10 @@ export function Providers({ children }: { children: ReactNode }) {
     useNotification();
   const [mounted, setMounted] = useState(false);
 
+  /**
+   * Единственная точка начальной инициализации приложения.
+   * useAuth не дублирует initBridge/hydrate.
+   */
   useEffect(() => {
     initBridge();
     hydrate();
@@ -31,25 +36,28 @@ export function Providers({ children }: { children: ReactNode }) {
     setMounted(true);
   }, [hydrate, checkShouldShow]);
 
-  /** Оффлайн-синк: при восстановлении сети отправляем накопленные ответы. */
+  /** Отправить офлайн-очередь после восстановления сети. */
   useEffect(() => {
     if (!mounted) return;
+
     const handleOnline = async () => {
       const queue = getRaw<AnswerRecord[]>(STORAGE_OFFLINE_QUEUE);
-      if (queue && queue.length > 0) {
-        try {
-          await sheetsApi.syncOffline(queue);
-          setRaw(STORAGE_OFFLINE_QUEUE, []);
-          await logEvent('offline_sync', { count: queue.length });
-        } catch (e) {
-          // Не удалось — оставим в очереди для следующей попытки.
-          console.warn('[providers] offline sync failed:', e);
-        }
+      if (!queue || queue.length === 0) return;
+
+      try {
+        await sheetsApi.syncOffline(queue);
+        setRaw(STORAGE_OFFLINE_QUEUE, []);
+        await logEvent('offline_sync', { count: queue.length });
+      } catch (e) {
+        console.warn('[providers] offline sync failed:', e);
       }
     };
+
     window.addEventListener('online', handleOnline);
-    // Также проверяем при монтировании (могли быть оффлайн раньше).
-    if (navigator.onLine) handleOnline();
+    if (navigator.onLine) {
+      void handleOnline();
+    }
+
     return () => window.removeEventListener('online', handleOnline);
   }, [mounted]);
 
@@ -57,7 +65,6 @@ export function Providers({ children }: { children: ReactNode }) {
     <>
       {children}
       <ToastContainer />
-      {/* Попап уведомлений при первом заходе. */}
       <NotificationModal
         open={showPopup}
         onAllow={request}

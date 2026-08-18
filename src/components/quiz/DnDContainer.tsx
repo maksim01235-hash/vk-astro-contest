@@ -1,9 +1,8 @@
 /**
  * components/quiz/DnDContainer.tsx — контейнер drag-and-drop через @dnd-kit.
  *
- * Обновления (август 2026):
- *  - Применение imageSize/maxImageSize к <img> для автоподстройки размера.
- *  - Рендер текста с учётом textPosition (left/right/top/bottom) относительно изображения.
+ * Исправления (v2):
+ *  - textPosition: left/right/top/bottom теперь работают корректно.
  */
 
 'use client';
@@ -35,26 +34,20 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
   const zones = blocks.filter((b): b is Extract<Block, { type: 'DragZone' }> => b.type === 'DragZone');
   const objects = blocks.filter((b): b is Extract<Block, { type: 'DragObject' }> => b.type === 'DragObject');
 
-  // Состояние: { zoneId: [objectId, ...] }. Объекты без зоны — в "unassigned".
   const [state, setState] = useState<DnDState>({ unassigned: objects.map((o) => o.objectId) });
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Сенсоры: мышь, тач, клавиатура (для доступности).
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
     useSensor(KeyboardSensor),
   );
 
-  // Держим последнюю версию onStateChange в ref, чтобы НЕ включать её
-  // в зависимости эффекта ниже — так эффект реагирует только на смену state,
-  // а не на пересборку колбэка родителем.
   const onStateChangeRef = useRef(onStateChange);
   useEffect(() => {
     onStateChangeRef.current = onStateChange;
   }, [onStateChange]);
 
-  // Уведомляем родителя об изменении состояния — только когда меняется state.
   useEffect(() => {
     onStateChangeRef.current(state);
   }, [state]);
@@ -71,24 +64,19 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
       const targetZoneId = over ? String(over.id) : 'unassigned';
       setActiveId(null);
 
-      // Проверяем, разрешена ли зона для этого объекта.
       const obj = objects.find((o) => o.objectId === objectId);
       if (!obj) return;
 
       if (targetZoneId !== 'unassigned' && !obj.allowedZones.includes(targetZoneId)) {
-        // Зона не разрешена — объект возвращается.
         logEvent('dnd_change', { action: 'drop_rejected', objectId, zoneId: targetZoneId });
         return;
       }
 
-      // Удаляем объект из всех зон.
       const newState: DnDState = {};
       for (const [zoneId, items] of Object.entries(state)) {
         newState[zoneId] = items.filter((id) => id !== objectId);
       }
-      // Добавляем в целевую зону.
       if (!newState[targetZoneId]) newState[targetZoneId] = [];
-      // Проверяем лимит maxItems.
       const zone = zones.find((z) => z.zoneId === targetZoneId);
       if (zone?.maxItems && newState[targetZoneId].length >= zone.maxItems) {
         logEvent('dnd_change', { action: 'drop_full', objectId, zoneId: targetZoneId });
@@ -102,25 +90,15 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
     [objects, zones, state],
   );
 
-  // Объект, который сейчас перетаскивается.
-  const activeObject = activeId
-    ? objects.find((o) => o.objectId === activeId)
-    : null;
+  const activeObject = activeId ? objects.find((o) => o.objectId === activeId) : null;
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex flex-col gap-4">
-        {/* Зоны (корзины). */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {zones.map((zone) => {
             const items = state[zone.zoneId] || [];
-            const isAllowed =
-              !activeObject || activeObject.allowedZones.includes(zone.zoneId);
+            const isAllowed = !activeObject || activeObject.allowedZones.includes(zone.zoneId);
             return (
               <DroppableZone
                 key={zone.id}
@@ -134,23 +112,15 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
             );
           })}
         </div>
-
-        {/* Объекты без зоны (исходная позиция). */}
         <div className="card-surface">
-          <h4 className="text-sm font-medium text-slate-500 mb-3">
-            Доступные объекты
-          </h4>
+          <h4 className="text-sm font-medium text-slate-500 mb-3">Доступные объекты</h4>
           <div className="flex flex-wrap gap-2">
             {(state.unassigned || []).map((objectId) => {
               const obj = objects.find((o) => o.objectId === objectId);
               if (!obj) return null;
               return <DraggableObject key={obj.id} object={obj} />;
             })}
-            {(state.unassigned || []).length === 0 && (
-              <span className="text-sm text-slate-400">
-                Все объекты распределены
-              </span>
-            )}
+            {(state.unassigned || []).length === 0 && <span className="text-sm text-slate-400">Все объекты распределены</span>}
           </div>
         </div>
       </div>
@@ -158,11 +128,6 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
   );
 }
 
-// ============================================================
-// ВЛОЖЕННЫЕ КОМПОНЕНТЫ
-// ============================================================
-
-/** Droppable-зона (корзина). */
 function DroppableZone({
   zoneId,
   label,
@@ -198,30 +163,21 @@ function DroppableZone({
           if (!obj) return null;
           return <DraggableObject key={obj.id} object={obj} />;
         })}
-        {items.length === 0 && (
-          <span className="text-xs text-slate-400">Перетащите сюда</span>
-        )}
+        {items.length === 0 && <span className="text-xs text-slate-400">Перетащите сюда</span>}
       </div>
     </div>
   );
 }
 
-/** Draggable-объект. */
 function DraggableObject({
   object,
 }: {
   object: Extract<Block, { type: 'DragObject' }>;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: object.objectId });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: object.objectId });
 
-  const style = transform
-    ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-      }
-    : undefined;
+  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
 
-  // Вычисляем размер изображения.
   const imgSize = object.imageSize || object.maxImageSize;
   const imgStyle = imgSize
     ? { width: `${imgSize}px`, height: `${imgSize}px` }
@@ -229,22 +185,26 @@ function DraggableObject({
     ? { maxWidth: `${object.maxImageSize}px`, maxHeight: `${object.maxImageSize}px` }
     : undefined;
 
-  // Определяем flex-направление по textPosition.
   const hasImage = !!object.image;
   const hasLabel = !!object.label && object.label.trim() !== '';
   const textPos = object.textPosition || 'left';
 
+  // Исправленная логика:
+  // left: текст слева, картинка справа → flex-row-reverse
+  // right: текст справа, картинка слева → flex-row
+  // top: текст над картинкой → flex-col-reverse
+  // bottom: текст под картинкой → flex-col
   const flexClass =
     !hasImage || !hasLabel
-      ? 'flex-row' // только текст или только картинка
-      : textPos === 'left'
       ? 'flex-row'
-      : textPos === 'right'
+      : textPos === 'left'
       ? 'flex-row-reverse'
+      : textPos === 'right'
+      ? 'flex-row'
       : textPos === 'top'
-      ? 'flex-col'
-      : textPos === 'bottom'
       ? 'flex-col-reverse'
+      : textPos === 'bottom'
+      ? 'flex-col'
       : 'flex-row';
 
   return (
@@ -263,7 +223,6 @@ function DraggableObject({
       )}
     >
       {object.image && (
-        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={object.image}
           alt={object.label || 'DnD object'}

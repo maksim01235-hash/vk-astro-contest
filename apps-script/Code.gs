@@ -1,28 +1,27 @@
 /**
  * Google Apps Script backend for VK Contest.
  *
- * Обновления (август 2026):
- *  - CacheService для getCards/getCard/saveCard (TTL 5 мин).
- *  - Индекс строк Cards через CacheService для быстрого updateRow.
- *  - Новый action getCardsList (без json_schema).
- *  - Logs: старые строки — архив, новые — 3 столбца (vk_id, timestamp, log).
- *  - saveAnswer/saveFeedback принимают log и пишут его в Logs.
+ * Обновления (август 2026, v2):
+ *  - saveFeedback: запись отдельными строками в лист Feedback (было: ячейка A2).
+ *  - getStats: добавлено subscribed_count.
+ *  - getCards: кеш через CacheService (TTL 5 мин).
+ *  - getCardsList: лёгкий список без json_schema.
  */
 
 var SHEET_USERS = 'Users';
 var SHEET_CARDS = 'Cards';
 var SHEET_ANSWERS = 'Answers';
 var SHEET_LOGS = 'Logs';
-var FEEDBACK_CELL = 'A2';
+var SHEET_FEEDBACK = 'Feedback';
 
 var HEADERS = {
   Users: ['vk_id', 'name', 'reg_date', 'subscribed', 'last_activity'],
   Cards: ['card_id', 'title', 'release_datetime', 'post_id', 'json_schema', 'is_active'],
   Answers: ['id', 'vk_id', 'card_id', 'open_timestamp', 'submit_timestamp', 'delta_seconds', 'user_answer', 'has_reposted'],
   Logs: ['id', 'timestamp', 'vk_id', 'event_type', 'event_data', 'page_url', 'user_agent'],
+  Feedback: ['id', 'timestamp', 'vk_id', 'name', 'card_id', 'message'],
 };
 
-// Кеш: 5 минут для карточек.
 var CACHE_TTL_SEC = 300;
 
 function getCache() {
@@ -146,7 +145,7 @@ function nextId(name) {
 }
 
 // ============================================================
-// КЕШИРОВАНИЕ КАРТОЧЕК (CacheService)
+// КЕШИРОВАНИЕ КАРТОЧЕК
 // ============================================================
 
 function getCards() {
@@ -162,10 +161,6 @@ function getCards() {
   return cards;
 }
 
-/**
- * Новый action: только card_id, title, is_active (без json_schema).
- * Используется в админке для селектора карточек.
- */
 function getCardsList() {
   var cache = getCache();
   var cached = cache.get('cards_list');
@@ -199,46 +194,11 @@ function getCard(id) {
   return card;
 }
 
-/**
- * Инвалидация кеша при записи карточки.
- * Также ведём индекс card_id → номер строки для быстрого updateRow.
- */
 function invalidateCardCache(cardId) {
   var cache = getCache();
   cache.remove('cards_all');
   cache.remove('cards_list');
   cache.remove('card_' + String(cardId));
-}
-
-function getCardsRowIndex(cardId) {
-  var cache = getCache();
-  var idx = cache.get('cards_index');
-  if (idx) {
-    var map = JSON.parse(idx);
-    if (map[String(cardId)]) return map[String(cardId)];
-  }
-  // Индекса нет — сканируем лист (один раз), строим карту.
-  var sheet = getSheet(SHEET_CARDS);
-  var data = sheet.getDataRange().getValues();
-  if (!data.length) return null;
-  var headers = data[0];
-  var cardIdCol = headers.indexOf('card_id');
-  if (cardIdCol === -1) return null;
-  var map = {};
-  for (var i = 1; i < data.length; i++) {
-    var cid = String(data[i][cardIdCol]);
-    map[cid] = i + 1; // 1-based row number
-  }
-  cache.put('cards_index', JSON.stringify(map), CACHE_TTL_SEC);
-  return map[String(cardId)] || null;
-}
-
-function updateCardsIndex(cardId, rowNum) {
-  var cache = getCache();
-  var idx = cache.get('cards_index');
-  var map = idx ? JSON.parse(idx) : {};
-  map[String(cardId)] = rowNum;
-  cache.put('cards_index', JSON.stringify(map), CACHE_TTL_SEC);
 }
 
 // ============================================================
@@ -276,43 +236,12 @@ function saveUser(user) {
 }
 
 // ============================================================
-// ОТВЕТЫ (с схлопыванием user_answer на сервере, опционально)
+// ОТВЕТЫ
 // ============================================================
 
 function saveAnswer(answer) {
   if (!answer.vk_id || !answer.card_id) throw new Error('vk_id and card_id are required');
   var id = nextId(SHEET_ANSWERS);
-  
-  // Схлопывание user_answer на сервере (если клиент не схлопнул сам).
-  var userAnswer = answer.user_answer;
-  if (typeof userAnswer === 'string') {
-    try {
-      var parsed = JSON.parse(userAnswer);
-      if (parsed.inputs && parsed.dnd) {
-        var dndEmpty = true;
-        for (var k in parsed.dnd) {
-          if (k !== 'unassigned' && parsed.dnd[k].length > 0) {
-            dndEmpty = false;
-            break;
-          }
-        }
-        if (dndEmpty) {
-          var inputs = parsed.inputs || {};
-          var keys = Object.keys(inputs);
-          if (keys.length === 1) {
-            userAnswer = inputs[keys[0]];
-          } else if (keys.length > 1) {
-            // Склейка через ";" в порядке keys (сортировка для предсказуемости).
-            keys.sort();
-            userAnswer = keys.map(function(k) { return inputs[k]; }).join(';');
-          }
-        }
-      }
-    } catch (e) {
-      // Не JSON — оставляем как есть.
-    }
-  }
-  
   appendRow(SHEET_ANSWERS, {
     id: id,
     vk_id: answer.vk_id,
@@ -320,74 +249,34 @@ function saveAnswer(answer) {
     open_timestamp: answer.open_timestamp,
     submit_timestamp: answer.submit_timestamp || new Date().toISOString(),
     delta_seconds: answer.delta_seconds || 0,
-    user_answer: typeof userAnswer === 'string' ? userAnswer : JSON.stringify(userAnswer),
+    user_answer: typeof answer.user_answer === 'string' ? answer.user_answer : JSON.stringify(answer.user_answer),
     has_reposted: answer.has_reposted || false,
   });
-  
-  // Если пришёл log — пишем в Logs (новая схема: vk_id, timestamp, log).
-  if (answer.log && Array.isArray(answer.log) && answer.log.length > 0) {
-    writeLogBatch([answer.vk_id], [new Date().toISOString()], [JSON.stringify(answer.log)]);
-  }
-  
   return { id: id };
 }
 
 // ============================================================
-// ЛОГИ (новая схема: vk_id, timestamp, log — одним JSON в ячейке)
+// ОБРАТНАЯ СВЯЗЬ (новая версия: отдельные строки в лист Feedback)
 // ============================================================
 
-/**
- * Пишет пачку логов в лист Logs.
- * Старые строки (7 столбцов) остаются как архив.
- * Новые записываются в 3 столбца: vk_id, timestamp, log.
- */
-function writeLogBatch(vkIds, timestamps, logsJson) {
-  var sheet = getSheet(SHEET_LOGS);
-  var lastRow = sheet.getLastRow();
-  var newRows = [];
-  for (var i = 0; i < vkIds.length; i++) {
-    newRows.push([
-      vkIds[i],
-      timestamps[i],
-      logsJson[i],
-    ]);
-  }
-  if (newRows.length > 0) {
-    sheet.getRange(lastRow + 1, 1, newRows.length, 3).setValues(newRows);
-  }
-}
-
-/**
- * Обратная связь: теперь лог фидбэка пишется в Logs (новая схема),
- * а не в отдельную ячейку A2. Старые записи в A2 остаются как архив.
- */
 function saveFeedback(feedback) {
   if (!feedback.message || !String(feedback.message).trim()) {
     throw new Error('message is required');
   }
-  
-  var entry = {
+  var id = nextId(SHEET_FEEDBACK);
+  appendRow(SHEET_FEEDBACK, {
+    id: id,
     timestamp: new Date().toISOString(),
     vk_id: feedback.vk_id || 'anonymous',
-    event_type: 'feedback',
-    event_data: {
-      card_id: feedback.card_id || '',
-      name: feedback.name || '',
-      message: String(feedback.message).trim(),
-    },
-    page_url: feedback.page_url || '',
-    user_agent: feedback.user_agent || '',
-  };
-  
-  // Пишем в Logs (новая схема: vk_id, timestamp, log).
-  var logJson = JSON.stringify([entry]);
-  writeLogBatch([entry.vk_id], [entry.timestamp], [logJson]);
-  
-  return { saved: true };
+    name: feedback.name || '',
+    card_id: feedback.card_id || '',
+    message: String(feedback.message).trim(),
+  });
+  return { id: id };
 }
 
 // ============================================================
-// КАРТОЧКИ (с кешем и индексом строк)
+// КАРТОЧКИ
 // ============================================================
 
 function saveCard(card) {
@@ -402,34 +291,16 @@ function saveCard(card) {
     is_active: card.is_active !== false,
   };
   if (existing) {
-    var rowNum = getCardsRowIndex(card.card_id);
-    if (rowNum) {
-      var sheet = getSheet(SHEET_CARDS);
-      var headers = HEADERS.Cards;
-      for (var j = 0; j < headers.length; j++) {
-        if (record[headers[j]] !== undefined) {
-          sheet.getRange(rowNum, j + 1).setValue(record[headers[j]]);
-        }
-      }
-    } else {
-      // Индекс не нашёл — fallback на updateRow.
-      updateRow(SHEET_CARDS, 'card_id', card.card_id, record);
-    }
+    updateRow(SHEET_CARDS, 'card_id', card.card_id, record);
   } else {
     appendRow(SHEET_CARDS, record);
-    // Обновляем индекс: новая строка = lastRow.
-    var sheet = getSheet(SHEET_CARDS);
-    updateCardsIndex(card.card_id, sheet.getLastRow());
   }
-  
-  // Инвалидируем кеш.
   invalidateCardCache(card.card_id);
-  
   return { saved: true };
 }
 
 // ============================================================
-// СТАТИСТИКА
+// СТАТИСТИКА (с subscribed_count)
 // ============================================================
 
 function getStats() {
@@ -437,6 +308,15 @@ function getStats() {
   var answers = readSheet(SHEET_ANSWERS);
   var users = readSheet(SHEET_USERS);
   var totalUsers = users.length;
+  
+  // Подсчёт подписавшихся.
+  var subscribedCount = 0;
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].subscribed === true || users[i].subscribed === 'TRUE' || users[i].subscribed === 'true') {
+      subscribedCount++;
+    }
+  }
+  
   return cards.map(function(card) {
     var cardAnswers = answers.filter(function(a) {
       return String(a.card_id) === String(card.card_id);
@@ -449,6 +329,7 @@ function getStats() {
       title: card.title,
       total_answers: total,
       total_users: totalUsers,
+      subscribed_count: subscribedCount,
       pct_answered: totalUsers ? Math.round(total / totalUsers * 100) : 0,
       avg_delta: Math.round(avg),
       min_delta: total ? Math.round(Math.min.apply(null, deltas)) : 0,
@@ -472,7 +353,7 @@ function syncOffline(body) {
 }
 
 // ============================================================
-// ПРОВЕРКА РЕПОСТА (VK API)
+// ПРОВЕРКА РЕПОСТА
 // ============================================================
 
 function checkRepostViaVK(vkId, postId) {
@@ -502,7 +383,7 @@ function serializeParams(obj) {
 }
 
 // ============================================================
-// ИНИЦИАЛИЗАЦИЯ ЛИСТОВ
+// ИНИЦИАЛИЗАЦИЯ
 // ============================================================
 
 function setupSheets() {
