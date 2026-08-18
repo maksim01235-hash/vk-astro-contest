@@ -8,6 +8,9 @@
  *    Например, для https://username.github.io/vk-contest-mini-app/ basePath = '/vk-contest-mini-app'.
  *    Для пользовательского домена или корня — basePath = ''.
  *  - trailingSlash: true — GitHub Pages корректно отдаёт папки с index.html.
+ *
+ * Обновления (август 2026):
+ *  - Удалены упоминания NEXT_PUBLIC_PREBUILD_CARD_IDS (больше не нужен).
  */
 
 /** @type {import('next').NextConfig} */

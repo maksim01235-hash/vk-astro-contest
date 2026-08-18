@@ -1,10 +1,8 @@
 /**
  * lib/hooks/useCard.ts — хук для работы с карточкой конкурса.
  *
- * Логика:
- *  - Загружает карточку по ID (с кешем localStorage на 5 минут).
- *  - Фиксирует время открытия карточки в localStorage.
- *  - Вычисляет статус карточки для пользователя.
+ * Время открытия хранится только в localStorage и НЕ записывается в Logs.
+ * Оно используется QuizClient для расчёта delta_seconds в Answers.
  */
 
 'use client';
@@ -12,7 +10,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
-import { useUserStore } from '@/lib/store/userStore';
 import { useCardsStore } from '@/lib/store/cardsStore';
 import {
   CARDS_CACHE_TTL_MS,
@@ -22,36 +19,30 @@ import {
 import { getWithTTL, setWithTTL, setRaw, getRaw } from '@/utils/storage';
 import type { CardRecord, CardWithStatus } from '@/types';
 
-/** Ключ времени открытия карточки в localStorage. */
 function openTimeKey(cardId: string): string {
   return `${STORAGE_OPEN_TIME_PREFIX}${cardId}_open`;
 }
 
 export function useCard(cardId: string) {
   const { cards } = useCardsStore();
-  const { vkUser } = useUserStore();
   const [card, setCard] = useState<CardRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openTime, setOpenTime] = useState<number | null>(null);
   const [serverTime, setServerTime] = useState<string | null>(null);
 
-  /** Загрузка карточки (с кешем). */
   const loadCard = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Сначала ищем в общем кеше списка карточек.
       let found: CardRecord | null = null;
       const cached = getWithTTL<CardRecord[]>(STORAGE_CARDS_KEY);
       if (cached) {
-        found = cached.find((c) => c.card_id === cardId) || null;
+        found = cached.find((c) => String(c.card_id) === String(cardId)) || null;
       }
-      // Если в кеше нет — ищем в store (если список уже загружен).
       if (!found && cards.length > 0) {
-        found = cards.find((c) => c.card_id === cardId) || null;
+        found = cards.find((c) => String(c.card_id) === String(cardId)) || null;
       }
-      // Если нигде нет — запрашиваем у API.
       if (!found) {
         found = await sheetsApi.getCard(cardId);
       }
@@ -69,14 +60,13 @@ export function useCard(cardId: string) {
     }
   }, [cardId, cards]);
 
-  /** Фиксация времени открытия карточки. */
-  const fixOpenTime = useCallback(async () => {
+  /** Фиксируем время только локально, без записи в Google Sheets. */
+  const fixOpenTime = useCallback(() => {
     const key = openTimeKey(cardId);
     let stored = getRaw<number>(key);
     if (!stored) {
       stored = Date.now();
       setRaw(key, stored);
-      await logEvent('card_open', { card_id: cardId, open_timestamp: stored });
     }
     setOpenTime(stored);
   }, [cardId]);
@@ -86,17 +76,14 @@ export function useCard(cardId: string) {
     fixOpenTime();
   }, [loadCard, fixOpenTime]);
 
-  /** Вычислить статус карточки (с использованием серверного времени). */
   const getCardWithStatus = useCallback(async (): Promise<CardWithStatus | null> => {
     if (!card) return null;
-    // Получаем серверное время один раз (кешируем в state).
     let nowIso = serverTime;
     if (!nowIso) {
       try {
         nowIso = await sheetsApi.getServerTime();
         setServerTime(nowIso);
       } catch {
-        // Fallback на клиентское время.
         nowIso = new Date().toISOString();
       }
     }
@@ -104,11 +91,8 @@ export function useCard(cardId: string) {
     if (new Date(nowIso).getTime() < new Date(card.release_datetime).getTime()) {
       status = 'locked';
     }
-    // Проверка, отправлен ли ответ — через localStorage (упрощённо для MVP).
     const result = getRaw<{ submitted: boolean }>(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`);
-    if (result?.submitted) {
-      status = 'completed';
-    }
+    if (result?.submitted) status = 'completed';
     return { ...card, status };
   }, [card, cardId, serverTime]);
 

@@ -13,9 +13,12 @@
 #     - NEXT_PUBLIC_SHEETS_API_URL — URL вашего Apps Script.
 #     - NEXT_PUBLIC_ADMIN_PASSWORD_HASH — SHA-256-хеш пароля админки.
 #     - NEXT_PUBLIC_BASE_PATH — путь репозитория (например, /vk-contest-mini-app).
-#     - NEXT_PUBLIC_PREBUILD_CARD_IDS — ID карточек через запятую (1,2,3).
 #     - NEXT_PUBLIC_MOCK_MODE — false (для продакшна).
+#     - NEXT_PUBLIC_VK_APP_ID — ID приложения VK.
 #  4. При пуше в main — автоматически соберётся и опубликуется.
+#
+# Обновления (август 2026):
+#  - Удалён секрет NEXT_PUBLIC_PREBUILD_CARD_IDS (больше не нужен).
 # ============================================================
 
 name: Deploy to GitHub Pages
@@ -57,8 +60,8 @@ jobs:
           NEXT_PUBLIC_SHEETS_API_URL: ${{ secrets.NEXT_PUBLIC_SHEETS_API_URL }}
           NEXT_PUBLIC_ADMIN_PASSWORD_HASH: ${{ secrets.NEXT_PUBLIC_ADMIN_PASSWORD_HASH }}
           NEXT_PUBLIC_BASE_PATH: ${{ secrets.NEXT_PUBLIC_BASE_PATH }}
-          NEXT_PUBLIC_PREBUILD_CARD_IDS: ${{ secrets.NEXT_PUBLIC_PREBUILD_CARD_IDS }}
           NEXT_PUBLIC_MOCK_MODE: ${{ secrets.NEXT_PUBLIC_MOCK_MODE }}
+          NEXT_PUBLIC_VK_APP_ID: ${{ secrets.NEXT_PUBLIC_VK_APP_ID }}
 
       - name: Add .nojekyll (для GitHub Pages)
         run: touch out/.nojekyll

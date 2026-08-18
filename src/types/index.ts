@@ -2,6 +2,10 @@
  * types/index.ts — глобальные TypeScript-интерфейсы для всего приложения.
  * Здесь описаны все структуры данных: пользователь, карточка, ответ, лог,
  * блоки карточки (JSON-схема конструктора), состояние DnD.
+ *
+ * Обновления (август 2026):
+ *  - DragObjectBlock: label стал опциональным, добавлены textPosition, maxImageSize, imageSize.
+ *  - LogRecord: упрощён под новую схему (vk_id, timestamp, log).
  */
 
 // ============================================================
@@ -141,17 +145,26 @@ export interface DragZoneBlock extends BaseBlock {
   maxItems?: number;
 }
 
+/** Положение текста относительно изображения в DragObject. */
+export type TextPosition = 'left' | 'right' | 'top' | 'bottom';
+
 /** Объект для перетаскивания. */
 export interface DragObjectBlock extends BaseBlock {
   type: 'DragObject';
   /** ID объекта. */
   objectId: string;
-  /** Отображаемый текст объекта. */
-  label: string;
+  /** Отображаемый текст объекта (опционально, можно оставить пустым). */
+  label?: string;
+  /** Положение текста относительно изображения (если есть и image, и label). */
+  textPosition?: TextPosition;
   /** ID зон, в которые можно перетащить этот объект. */
   allowedZones: string[];
   /** Картинка объекта (опционально). */
   image?: string;
+  /** Максимальный размер изображения для автоподстройки (px). */
+  maxImageSize?: number;
+  /** Фиксированный размер изображения (px, приоритетнее maxImageSize). */
+  imageSize?: number;
 }
 
 /** Объединённый тип блока. */
@@ -196,7 +209,10 @@ export interface AnswerPayload {
   dnd: DnDState;
 }
 
-/** Запись лога — таблица Logs. */
+/**
+ * Запись лога — упрощённая схема для новой структуры Logs.
+ * На сервере пишется как { vk_id, timestamp, log: LogRecord[] }.
+ */
 export interface LogRecord {
   timestamp: string; // ISO
   vk_id: string;

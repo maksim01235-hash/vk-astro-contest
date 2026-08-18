@@ -1,20 +1,13 @@
 /**
  * app/admin/page.tsx — админ-панель: конструктор карточек.
  *
- * Защита: простой пароль (SHA-256-хеш). Вводится при входе.
- * ВАЖНО: это защита от случайного доступа, НЕ криптографическая.
- *
- * Интерфейс:
- *  - Слева — панель инструментов (BlockToolbar).
- *  - Центр — холст (Canvas) с перетаскиванием блоков.
- *  - Справа — свойства выбранного блока (PropertiesPanel).
- *  - Сверху — поля карточки (название, release_datetime, post_id).
- *  - Кнопка "Сохранить карточку" → формирует JSON-схему, отправляет в Sheets.
+ * Обновления (август 2026):
+ *  - Используется getCardsList() вместо getCards() для селектора карточек (без json_schema).
  */
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { BlockToolbar } from '@/components/admin/BlockToolbar';
 import { Canvas } from '@/components/admin/Canvas';
@@ -24,19 +17,32 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { sheetsApi } from '@/lib/sheets/api.client';
-import { logEvent } from '@/lib/sheets/logger';
 import { verifyPassword } from '@/utils/crypto';
 import {
   ADMIN_PASSWORD_HASH,
   STORAGE_ADMIN_AUTH,
 } from '@/constants';
 import { getRaw, setRaw, remove } from '@/utils/storage';
-import { safeStringify } from '@/utils/json';
+import { safeStringify, safeParseSchema } from '@/utils/json';
+import type { Block, BlockType, CardRecord } from '@/types';
+
 // JSON.stringify с отступами для предпросмотра схемы.
 const stringifyPretty = (obj: unknown) => {
-  try { return JSON.stringify(obj, null, 2); } catch { return ''; };
+  try { return JSON.stringify(obj, null, 2); } catch { return ''; }
 };
-import type { Block, BlockType, CardRecord } from '@/types';
+
+/** Конвертация ISO-строки в значение для <input type="datetime-local">. */
+const toDatetimeLocalValue = (iso: string): string => {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return '';
+  }
+};
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
@@ -49,18 +55,51 @@ export default function AdminPage() {
   const [title, setTitle] = useState('');
   const [releaseDatetime, setReleaseDatetime] = useState('');
   const [postId, setPostId] = useState('');
+  const [isActive, setIsActive] = useState(true);
 
   // Блоки на холсте.
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Список существующих карточек — для выбора и редактирования.
+  const [existingCards, setExistingCards] = useState<Array<{ card_id: string; title: string; is_active: boolean }>>([]);
+  const [cardsLoading, setCardsLoading] = useState(false);
+  const [selectedExistingId, setSelectedExistingId] = useState('');
+
+  // Флаг "запрос уже в полёте" — защита от параллельных повторных вызовов getCardsList.
+  const isFetchingRef = useRef(false);
+
   const toast = useToast();
 
   /** Проверка, авторизован ли в этой сессии. */
   useEffect(() => {
-    const isAuthed = getRaw<boolean>(STORAGE_ADMIN_AUTH);
-    if (isAuthed) setAuthed(true);
+    const isAuthedNow = getRaw<boolean>(STORAGE_ADMIN_AUTH);
+    if (isAuthedNow) setAuthed(true);
   }, []);
+
+  /** Загрузить список карточек для редактирования (после авторизации). */
+  const loadExistingCards = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setCardsLoading(true);
+    try {
+      const cards = await sheetsApi.getCardsList();
+      setExistingCards(cards);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Ошибка загрузки карточек';
+      toast.error(msg);
+    } finally {
+      setCardsLoading(false);
+      isFetchingRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (authed) {
+      loadExistingCards();
+    }
+  }, [authed, loadExistingCards]);
 
   /** Вход по паролю. */
   const handleLogin = async (e: React.FormEvent) => {
@@ -68,11 +107,9 @@ export default function AdminPage() {
     setAuthChecking(true);
     setAuthError('');
     try {
-      // Если хеш не задан — пропускаем (demo-режим).
       if (!ADMIN_PASSWORD_HASH) {
         setAuthed(true);
         setRaw(STORAGE_ADMIN_AUTH, true);
-        await logEvent('admin_login', { mode: 'no_hash' });
         return;
       }
       const ok = await verifyPassword(password, ADMIN_PASSWORD_HASH);
@@ -80,14 +117,11 @@ export default function AdminPage() {
         setAuthed(true);
         setRaw(STORAGE_ADMIN_AUTH, true);
         setPassword('');
-        await logEvent('admin_login', { success: true });
       } else {
         setAuthError('Неверный пароль');
-        await logEvent('admin_login', { success: false });
       }
     } catch (e) {
       setAuthError('Ошибка проверки пароля');
-      await logEvent('admin_login', { error: String(e) });
     } finally {
       setAuthChecking(false);
     }
@@ -97,6 +131,51 @@ export default function AdminPage() {
   const handleLogout = () => {
     setAuthed(false);
     remove(STORAGE_ADMIN_AUTH);
+  };
+
+  /** Очистить форму и холст (создание карточки "с нуля"). */
+  const resetForm = () => {
+    setCardId('');
+    setTitle('');
+    setReleaseDatetime('');
+    setPostId('');
+    setIsActive(true);
+    setBlocks([]);
+    setSelectedId(null);
+    setSelectedExistingId('');
+  };
+
+  /**
+   * Загрузить выбранную карточку в форму для редактирования.
+   * json_schema приходит из Sheets строкой — парсим её в массив blocks.
+   */
+  const loadCardIntoForm = async (cardIdToLoad: string) => {
+    const card = await sheetsApi.getCard(cardIdToLoad);
+    if (!card) {
+      toast.error('Не удалось найти данные карточки');
+      return;
+    }
+    setCardId(String(card.card_id));
+    setTitle(card.title);
+    setReleaseDatetime(toDatetimeLocalValue(card.release_datetime));
+    setPostId(card.post_id || '');
+    setIsActive(card.is_active !== false);
+
+    const schema = safeParseSchema<{ blocks: Block[] }>(card.json_schema, { blocks: [] });
+    setBlocks(schema.blocks || []);
+    setSelectedId(null);
+  };
+
+  /**
+   * Обработчик выбора карточки в селекторе редактирования.
+   */
+  const handleSelectExisting = (id: string) => {
+    setSelectedExistingId(id);
+    if (!id) {
+      resetForm();
+      return;
+    }
+    loadCardIntoForm(id);
   };
 
   /** Добавить блок на холст. */
@@ -111,7 +190,7 @@ export default function AdminPage() {
     setBlocks(blocks.map((b) => (b.id === updated.id ? updated : b)));
   };
 
-  /** Сохранить карточку в Google Sheets. */
+  /** Сохранить карточку в Google Sheets (создание ИЛИ обновление по card_id). */
   const handleSave = async () => {
     if (!cardId || !title) {
       toast.error('Заполните ID и название карточки');
@@ -126,15 +205,15 @@ export default function AdminPage() {
           : new Date().toISOString(),
         post_id: postId,
         json_schema: safeStringify({ blocks }),
-        is_active: true,
+        is_active: isActive,
       };
       await sheetsApi.saveCard(card);
-      await logEvent('admin_save_card', { card_id: cardId, blocks_count: blocks.length });
-      toast.success('Карточка сохранена!');
+      const isEdit = existingCards.some((c) => String(c.card_id) === String(cardId));
+      toast.success(isEdit ? 'Карточка обновлена!' : 'Карточка сохранена!');
+      await loadExistingCards();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Ошибка сохранения';
       toast.error(msg);
-      await logEvent('api_error', { action: 'saveCard', error: msg });
     }
   };
 
@@ -184,6 +263,42 @@ export default function AdminPage() {
         </div>
       </div>
 
+      {/* Редактирование существующих карточек. */}
+      <div className="card-surface mb-4">
+        <h3 className="text-sm font-semibold text-slate-700 mb-3">
+          Редактирование карточки
+        </h3>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
+          <div className="flex-1 flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-slate-700">
+              Выберите карточку для редактирования
+            </label>
+            <select
+              className="input-field"
+              value={selectedExistingId}
+              onChange={(e) => handleSelectExisting(e.target.value)}
+              disabled={cardsLoading}
+            >
+              <option value="">— Новая карточка —</option>
+              {existingCards.map((c) => (
+                <option key={String(c.card_id)} value={String(c.card_id)}>
+                  {String(c.card_id)} — {c.title || '(без названия)'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button variant="secondary" onClick={loadExistingCards} disabled={cardsLoading}>
+            Обновить список
+          </Button>
+          <Button variant="secondary" onClick={resetForm}>
+            Новая карточка
+          </Button>
+        </div>
+        {cardsLoading && (
+          <p className="text-xs text-slate-400 mt-2">Загрузка карточек…</p>
+        )}
+      </div>
+
       {/* Поля карточки. */}
       <div className="card-surface mb-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-3">
@@ -195,6 +310,7 @@ export default function AdminPage() {
             value={cardId}
             onChange={(e) => setCardId(e.target.value)}
             placeholder="1"
+            disabled={!!selectedExistingId}
           />
           <Input
             label="Название"
@@ -215,6 +331,14 @@ export default function AdminPage() {
             placeholder="123"
           />
         </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 mt-3">
+          <input
+            type="checkbox"
+            checked={isActive}
+            onChange={(e) => setIsActive(e.target.checked)}
+          />
+          Карточка активна (видна пользователям)
+        </label>
       </div>
 
       {/* Трёхколоночный layout: инструменты | холст | свойства. */}
@@ -240,7 +364,9 @@ export default function AdminPage() {
 
       {/* Кнопки сохранения. */}
       <div className="flex items-center gap-3 mt-4">
-        <Button onClick={handleSave}>Сохранить карточку</Button>
+        <Button onClick={handleSave}>
+          {selectedExistingId ? 'Сохранить изменения' : 'Сохранить карточку'}
+        </Button>
         <Button variant="secondary" onClick={() => setShowJson(!showJson)}>
           {showJson ? 'Скрыть JSON' : 'Показать JSON'}
         </Button>

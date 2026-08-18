@@ -2,11 +2,22 @@
  * components/ui/Toast.tsx — всплывающее уведомление (toast).
  * Используется для сообщений "Нет соединения", "Ответ сохранён" и т.д.
  * Toast-ы управляются через Zustand store (toastStore).
+ *
+ * ПРАВКА (баг): useToast() возвращал новый объект { success, error, info }
+ * на КАЖДЫЙ рендер компонента (три новые функции-стрелки без useMemo).
+ * Любой код вида `useCallback(fn, [toast])` из-за этого пересобирался
+ * на каждый рендер, из-за чего useEffect с такой зависимостью запускался
+ * заново бесконечно — это вызывало шквал параллельных запросов к Apps
+ * Script (десятки XHR getCards подряд, каждый на 7–15 сек) и в итоге
+ * таймауты/отмену запросов в админ-панели.
+ * Теперь возвращаемый объект мемоизирован через useMemo — ссылка стабильна
+ * между рендерами, пока сам addToast не меняется (а он и не меняется,
+ * так как zustand-стор создаётся один раз на всё приложение).
  */
 
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { create } from 'zustand';
 import clsx from 'clsx';
 
@@ -37,14 +48,21 @@ const useToastStore = create<ToastStore>((set) => ({
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }));
 
-/** Хук для показа toast-ов из любого компонента. */
+/**
+ * Хук для показа toast-ов из любого компонента.
+ * Возвращает мемоизированный объект — стабильная ссылка между рендерами,
+ * безопасно использовать в массивах зависимостей useCallback/useEffect.
+ */
 export function useToast() {
-  const { addToast } = useToastStore();
-  return {
-    success: (msg: string) => addToast(msg, 'success'),
-    error: (msg: string) => addToast(msg, 'error'),
-    info: (msg: string) => addToast(msg, 'info'),
-  };
+  const addToast = useToastStore((s) => s.addToast);
+  return useMemo(
+    () => ({
+      success: (msg: string) => addToast(msg, 'success'),
+      error: (msg: string) => addToast(msg, 'error'),
+      info: (msg: string) => addToast(msg, 'info'),
+    }),
+    [addToast],
+  );
 }
 
 const typeClasses: Record<ToastType, string> = {

@@ -1,11 +1,16 @@
 /**
  * components/admin/PropertiesPanel.tsx — панель свойств выбранного блока.
  * Позволяет редактировать поля блока в зависимости от его типа.
+ *
+ * Обновления (август 2026):
+ *  - DragObject: добавлены поля textPosition, maxImageSize, imageSize.
+ *  - label для DragObject сделан опциональным (можно оставить пустым).
  */
 
 'use client';
 
-import type { Block } from '@/types';
+import { useState, useEffect } from 'react';
+import type { Block, TextPosition } from '@/types';
 import { Input } from '@/components/ui/Input';
 
 interface Props {
@@ -14,6 +19,19 @@ interface Props {
 }
 
 export function PropertiesPanel({ block, onChange }: Props) {
+  // Черновик строки для поля "Разрешённые зоны" (DragObject).
+  // Нужен, чтобы пользователь мог свободно вводить запятые и пробелы,
+  // не дожидаясь пересборки массива allowedZones на каждый keystroke.
+  const [zonesDraft, setZonesDraft] = useState('');
+
+  // Синхронизируем черновик только при переключении на другой блок
+  // (а не при каждом изменении block.allowedZones — иначе всё вернётся к багу).
+  useEffect(() => {
+    if (block?.type === 'DragObject') {
+      setZonesDraft(block.allowedZones.join(', '));
+    }
+  }, [block?.id, block?.type]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!block) {
     return (
       <div className="card-surface">
@@ -30,6 +48,16 @@ export function PropertiesPanel({ block, onChange }: Props) {
   /** Обновить поле блока. */
   const update = (field: string, value: unknown) => {
     onChange({ ...block, [field]: value } as Block);
+  };
+
+  /** Обработчик ввода в поле "Разрешённые зоны": обновляем черновик и массив. */
+  const handleZonesInput = (raw: string) => {
+    setZonesDraft(raw);
+    const zones = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    update('allowedZones', zones);
   };
 
   return (
@@ -183,9 +211,10 @@ export function PropertiesPanel({ block, onChange }: Props) {
               onChange={(e) => update('objectId', e.target.value)}
             />
             <Input
-              label="Текст объекта"
-              value={block.label}
+              label="Текст объекта (опционально)"
+              value={block.label || ''}
               onChange={(e) => update('label', e.target.value)}
+              placeholder="Оставьте пустым, если только картинка"
             />
             <Input
               label="URL картинки (опц.)"
@@ -194,19 +223,46 @@ export function PropertiesPanel({ block, onChange }: Props) {
             />
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-slate-700">
+                Положение текста
+              </label>
+              <select
+                className="input-field"
+                value={block.textPosition || 'left'}
+                onChange={(e) => update('textPosition', e.target.value as TextPosition)}
+              >
+                <option value="left">Слева от картинки</option>
+                <option value="right">Справа от картинки</option>
+                <option value="top">Над картинкой</option>
+                <option value="bottom">Под картинкой</option>
+              </select>
+            </div>
+            <Input
+              label="Макс. размер картинки (px, опц.)"
+              type="number"
+              value={String(block.maxImageSize || 0)}
+              onChange={(e) => update('maxImageSize', parseInt(e.target.value, 10) || 0)}
+              placeholder="0 = автоподстройка"
+            />
+            <Input
+              label="Фиксированный размер картинки (px, опц.)"
+              type="number"
+              value={String(block.imageSize || 0)}
+              onChange={(e) => update('imageSize', parseInt(e.target.value, 10) || 0)}
+              placeholder="0 = использовать макс. размер"
+            />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-slate-700">
                 Разрешённые зоны (через запятую)
               </label>
               <input
                 className="input-field"
-                value={block.allowedZones.join(', ')}
-                onChange={(e) =>
-                  update(
-                    'allowedZones',
-                    e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                  )
-                }
+                value={zonesDraft}
+                onChange={(e) => handleZonesInput(e.target.value)}
                 placeholder="zone1, zone2"
               />
+              <p className="text-xs text-slate-400">
+                Введите ID зон через запятую. Пробелы вокруг запятой не важны.
+              </p>
             </div>
           </>
         )}

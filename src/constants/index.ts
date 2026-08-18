@@ -2,6 +2,9 @@
  * constants/index.ts — все константы приложения.
  * URL, таймауты, TTL, ключи localStorage, хеш пароля админки, эндпоинты.
  * Каждая снабжена комментарием "что это" и "зачем".
+ *
+ * Обновления (август 2026):
+ *  - Добавлен API_ACTIONS.GET_CARDS_LIST для лёгкого списка карточек (без json_schema).
  */
 
 // ============================================================
@@ -11,14 +14,13 @@
 /**
  * URL опубликованного Apps Script веб-приложения.
  * Берётся из NEXT_PUBLIC_SHEETS_API_URL (задаётся в .env.local).
- * В mock-режиме не используется.
  */
 export const SHEETS_API_URL =
   process.env.NEXT_PUBLIC_SHEETS_API_URL || '';
 
 /**
- * Режим mock: если true — VK Bridge не вызывается, API отдаёт тестовые данные.
- * Удобно для локальной разработки и preview без VK.
+ * Режим mock: используется только для VK Bridge (авторизация, репост,
+ * уведомления) — см. lib/vk/bridge.ts. НЕ влияет на sheetsApi.
  */
 export const MOCK_MODE =
   process.env.NEXT_PUBLIC_MOCK_MODE === 'true' ||
@@ -78,9 +80,7 @@ export const STORAGE_FIRST_VISIT = `${STORAGE_PREFIX}first_visit`;
 /**
  * SHA-256-хеш пароля админки.
  * Берётся из NEXT_PUBLIC_ADMIN_PASSWORD_HASH.
- * Сгенерировать: см. README → "Настройка админки".
  * ВАЖНО: это защита от случайного доступа, НЕ криптографическая.
- * Любой может прочитать хеш в собранном коде и вызвать Apps Script напрямую.
  */
 export const ADMIN_PASSWORD_HASH =
   process.env.NEXT_PUBLIC_ADMIN_PASSWORD_HASH || '';
@@ -102,11 +102,11 @@ export const VK_APP_ID = process.env.NEXT_PUBLIC_VK_APP_ID || '';
 /** Все действия, которые фронт отправляет на Apps Script. */
 export const API_ACTIONS = {
   GET_CARDS: 'getCards',
+  GET_CARDS_LIST: 'getCardsList', // новый action: только card_id, title, is_active
   GET_CARD: 'getCard',
   SAVE_ANSWER: 'saveAnswer',
   CHECK_USER: 'checkUser',
   SAVE_USER: 'saveUser',
-  SAVE_LOG: 'saveLog',
   GET_STATS: 'getStats',
   SAVE_CARD: 'saveCard', // админка: сохранить карточку
   CHECK_REPOST: 'checkRepost', // проверка репоста через VK API

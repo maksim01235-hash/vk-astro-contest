@@ -134,8 +134,8 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
    - `NEXT_PUBLIC_SHEETS_API_URL` — URL Apps Script
    - `NEXT_PUBLIC_ADMIN_PASSWORD_HASH` — хеш пароля
    - `NEXT_PUBLIC_BASE_PATH` — путь репозитория (например, `/vk-contest-mini-app`)
-   - `NEXT_PUBLIC_PREBUILD_CARD_IDS` — ID карточек (например, `1,2,3`)
    - `NEXT_PUBLIC_MOCK_MODE` — `false`
+   - `NEXT_PUBLIC_VK_APP_ID` — ID приложения VK
 5. При пуше в main — автоматически соберётся и опубликуется.
 6. Сайт будет на `https://ВАШ_НИК.github.io/vk-contest-mini-app/`.
 
@@ -157,9 +157,9 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
 
 ## Ограничения статического экспорта
 
-1. **Динамические маршруты**: `/quiz/[id]` требует пребилда ID карточек
-   (через `NEXT_PUBLIC_PREBUILD_CARD_IDS`). Новые карточки после деплоя
-   требуют пересборку. Альтернатива: использовать `/quiz?id=X`.
+1. **Динамические маршруты**: `/quiz/[id]` требует пребилда ID карточек.
+   **Решение (август 2026)**: используется маршрут с query-параметром `/quiz?id=X`.
+   Любая новая карточка, добавленная в Google Sheets, сразу доступна без пересборки.
 
 2. **VK Bridge**: работает только внутри VK (приложение или vk.com).
    Вне VK используйте mock-режим.
@@ -178,7 +178,8 @@ vk-contest-mini-app/
 │   ├── app/                    # страницы (App Router)
 │   │   ├── layout.tsx          # корневой layout
 │   │   ├── page.tsx            # главная (список карточек)
-│   │   ├── quiz/[id]/         # карточка конкурса
+│   │   ├── quiz/
+│   │   │   └── page.tsx        # карточка конкурса (/quiz?id=X)
 │   │   ├── admin/             # админ-конструктор
 │   │   │   └── stats/        # статистика
 │   │   ├── thanks/            # благодарность
@@ -236,3 +237,14 @@ vk-contest-mini-app/
 - Recharts (графики)
 - @vkontakte/vk-bridge (VK)
 - Google Apps Script (бэкенд-прокси)
+
+## Обновления (август 2026)
+
+- **Кеширование карточек**: CacheService на стороне Apps Script (TTL 5 мин).
+- **Лёгкий список карточек**: новый action `getCardsList` (без json_schema) для админки.
+- **Индекс строк**: быстрый updateRow для saveCard без полного readSheet.
+- **Новая схема Logs**: старые строки — архив, новые — 3 столбца (vk_id, timestamp, log).
+- **Логирование**: логи копятся в памяти, отправляются только вместе с ответом/фидбэком.
+- **Динамические карточки**: `/quiz?id=X` вместо `/quiz/[id]` — новые карточки без пересборки.
+- **DnD-объекты**: опциональный текст, положение текста (left/right/top/bottom), размер картинки (maxImageSize/imageSize).
+- **Схлопывание user_answer**: один input → значение, несколько → склейка через `;`, dnd → полный формат.

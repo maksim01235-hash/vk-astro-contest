@@ -5,6 +5,12 @@
  * группируются в один DnDContainer в месте их первого появления.
  *
  * Сбор данных при отправке — из refs всех блоков.
+ *
+ * Обновления (август 2026):
+ *  - Схлопывание user_answer перед отправкой:
+ *    * dnd не пуст → полный формат {"inputs":{...},"dnd":{...}}.
+ *    * dnd пуст, один input → просто значение.
+ *    * dnd пуст, несколько inputs → склейка через ";" в порядке answerKey.
  */
 
 'use client';
@@ -16,7 +22,7 @@ import { InputFieldView } from './blocks/InputField';
 import { ButtonView } from './blocks/Button';
 import { DnDContainer } from './DnDContainer';
 import { safeParse } from '@/utils/json';
-import { useRef, useState } from 'react';
+import { useRef, useCallback } from 'react';
 
 interface CardRendererProps {
   jsonSchema: string; // JSON-строка из Sheets
@@ -29,8 +35,12 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
   // Рефы для сбора данных с блоков.
   const inputsRef = useRef<Record<string, string>>({});
   const dndRef = useRef<DnDState>({});
-  // Триггер перерисовки DnDContainer при изменении состояния.
-  const [, forceUpdate] = useState({});
+
+  // Стабильная ссылка на колбэк — не пересоздаётся между рендерами,
+  // поэтому useEffect внутри DnDContainer не перезапускается впустую.
+  const handleDndStateChange = useCallback((state: DnDState) => {
+    dndRef.current = state;
+  }, []);
 
   if (!schema.blocks || schema.blocks.length === 0) {
     return (
@@ -40,12 +50,44 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
     );
   }
 
-  /** Собрать данные со всех блоков и вызвать onSubmit. */
+  /**
+   * Собрать данные со всех блоков, схлопнуть user_answer и вызвать onSubmit.
+   */
   const handleSubmit = () => {
-    const payload: AnswerPayload = {
-      inputs: { ...inputsRef.current },
-      dnd: { ...dndRef.current },
-    };
+    const inputs = { ...inputsRef.current };
+    const dnd = { ...dndRef.current };
+
+    // Проверяем, пуст ли dnd (игнорируем unassigned).
+    let dndEmpty = true;
+    for (const key of Object.keys(dnd)) {
+      if (key !== 'unassigned' && dnd[key].length > 0) {
+        dndEmpty = false;
+        break;
+      }
+    }
+
+    let payload: AnswerPayload;
+
+    if (!dndEmpty) {
+      // DnD не пуст → полный формат.
+      payload = { inputs, dnd };
+    } else {
+      // DnD пуст → схлопываем inputs.
+      const keys = Object.keys(inputs);
+      if (keys.length === 1) {
+        // Один input → просто значение (передаём как строку в inputs, но на сервере схлопнется).
+        payload = { inputs: { answer: inputs[keys[0]] }, dnd: {} };
+      } else if (keys.length > 1) {
+        // Несколько inputs → склейка через ";" в порядке keys.
+        keys.sort();
+        const joined = keys.map((k) => inputs[k]).join(';');
+        payload = { inputs: { answer: joined }, dnd: {} };
+      } else {
+        // Нет inputs и dnd пуст → пустой payload.
+        payload = { inputs: {}, dnd: {} };
+      }
+    }
+
     onSubmit(payload);
   };
 
@@ -70,10 +112,7 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
             <DnDContainer
               key="dnd-container"
               blocks={dndBlocks}
-              onStateChange={(state) => {
-                dndRef.current = state;
-                forceUpdate({});
-              }}
+              onStateChange={handleDndStateChange}
             />
           );
         }

@@ -1,12 +1,8 @@
 /**
  * app/page.tsx — главная страница: список карточек конкурса.
  *
- * Логика:
- *  - Авторизация через VK (useAuth).
- *  - Если не авторизован — кнопка "Авторизоваться через VK".
- *  - Загрузка карточек (с кешем 5 минут).
- *  - Отображение статуса: locked (замок), available, completed (галочка).
- *  - Переход только к доступным и неотвеченным.
+ * Обновления (август 2026):
+ *  - Ссылки на карточки изменены с /quiz/[id] на /quiz?id=[id] для поддержки динамических карточек без пребилда.
  */
 
 'use client';
@@ -157,7 +153,7 @@ export default function HomePage() {
                   {isLocked && <span className="text-2xl">🔒</span>}
                   {!isLocked && (
                     <Link
-                      href={isCompleted ? `/thanks?card=${card.card_id}` : `/quiz/${card.card_id}`}
+                      href={isCompleted ? `/thanks?card=${card.card_id}` : `/quiz?id=${card.card_id}`}
                       className="btn-secondary text-sm"
                     >
                       {isCompleted ? 'Результат' : 'Открыть'}

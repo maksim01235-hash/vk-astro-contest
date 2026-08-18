@@ -1,13 +1,9 @@
 /**
  * components/quiz/DnDContainer.tsx — контейнер drag-and-drop через @dnd-kit.
  *
- * Логика:
- *  - DragZone — слоты (корзины), куда перетаскивают объекты.
- *  - DragObject — объекты, которые перетаскивают.
- *  - Каждый DragObject имеет allowedZones (массив zoneId).
- *  - При перетаскивании проверяется, разрешена ли зона.
- *  - Состояние DnD: { zoneId: [objectId, ...] }.
- *  - Анимации: подсветка допустимых зон, плавное перемещение.
+ * Обновления (август 2026):
+ *  - Применение imageSize/maxImageSize к <img> для автоподстройки размера.
+ *  - Рендер текста с учётом textPosition (left/right/top/bottom) относительно изображения.
  */
 
 'use client';
@@ -50,12 +46,18 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
     useSensor(KeyboardSensor),
   );
 
-  // Уведомляем родителя об изменении состояния.
-  const stateRef = useRef(state);
+  // Держим последнюю версию onStateChange в ref, чтобы НЕ включать её
+  // в зависимости эффекта ниже — так эффект реагирует только на смену state,
+  // а не на пересборку колбэка родителем.
+  const onStateChangeRef = useRef(onStateChange);
   useEffect(() => {
-    stateRef.current = state;
-    onStateChange(state);
-  }, [state, onStateChange]);
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
+
+  // Уведомляем родителя об изменении состояния — только когда меняется state.
+  useEffect(() => {
+    onStateChangeRef.current(state);
+  }, [state]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(String(event.active.id));
@@ -219,6 +221,32 @@ function DraggableObject({
       }
     : undefined;
 
+  // Вычисляем размер изображения.
+  const imgSize = object.imageSize || object.maxImageSize;
+  const imgStyle = imgSize
+    ? { width: `${imgSize}px`, height: `${imgSize}px` }
+    : object.maxImageSize
+    ? { maxWidth: `${object.maxImageSize}px`, maxHeight: `${object.maxImageSize}px` }
+    : undefined;
+
+  // Определяем flex-направление по textPosition.
+  const hasImage = !!object.image;
+  const hasLabel = !!object.label && object.label.trim() !== '';
+  const textPos = object.textPosition || 'left';
+
+  const flexClass =
+    !hasImage || !hasLabel
+      ? 'flex-row' // только текст или только картинка
+      : textPos === 'left'
+      ? 'flex-row'
+      : textPos === 'right'
+      ? 'flex-row-reverse'
+      : textPos === 'top'
+      ? 'flex-col'
+      : textPos === 'bottom'
+      ? 'flex-col-reverse'
+      : 'flex-row';
+
   return (
     <div
       ref={setNodeRef}
@@ -230,13 +258,20 @@ function DraggableObject({
         'hover:shadow-md hover:border-accent active:cursor-grabbing',
         'select-none text-sm font-medium text-slate-700',
         isDragging && 'opacity-50 z-50 scale-105',
+        'flex items-center gap-2',
+        flexClass,
       )}
     >
       {object.image && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={object.image} alt={object.label} className="w-8 h-8 inline-block mr-2 rounded" />
+        <img
+          src={object.image}
+          alt={object.label || 'DnD object'}
+          className="rounded object-cover"
+          style={imgStyle}
+        />
       )}
-      {object.label}
+      {hasLabel && <span>{object.label}</span>}
     </div>
   );
 }
