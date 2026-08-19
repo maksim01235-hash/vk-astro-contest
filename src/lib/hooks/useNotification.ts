@@ -1,11 +1,8 @@
 /**
  * src/lib/hooks/useNotification.ts — запрос разрешения на уведомления.
  *
- * Особенности:
- *  - Попап показывается только после готовности vkUser (контролирует Providers).
- *  - request дополнительно защищён от вызова без vkUser.
- *  - При успешном разрешении subscribed=true всегда записывается в Sheets,
- *    включая первый визит, когда userRecord ещё может быть null.
+ * Диагностика: подробности ошибки VK Bridge (error_type, error_data, message)
+ * сохраняются в накопленный лог при неудачном VKWebAppAllowNotifications.
  */
 
 'use client';
@@ -20,14 +17,35 @@ import { getRaw, setRaw } from '@/utils/storage';
 import { nowISO } from '@/utils/time';
 import type { UserRecord } from '@/types';
 
+/** Безопасно извлечь полезные поля из неизвестной ошибки VK Bridge. */
+function serializeBridgeError(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== 'object') {
+    return { raw: String(error) };
+  }
+
+  const bridgeError = error as {
+    message?: unknown;
+    error_type?: unknown;
+    error_data?: unknown;
+    code?: unknown;
+    detail?: unknown;
+  };
+
+  return {
+    message: typeof bridgeError.message === 'string' ? bridgeError.message : String(error),
+    error_type: bridgeError.error_type ?? null,
+    error_data: bridgeError.error_data ?? null,
+    code: bridgeError.code ?? null,
+    detail: bridgeError.detail ?? null,
+  };
+}
+
 export function useNotification() {
   const { vkUser, userRecord, setUserRecord } = useUserStore();
   const [showPopup, setShowPopup] = useState(false);
   const [requesting, setRequesting] = useState(false);
 
-  /** Показать попап на первом визите, если пользователь ещё не сделал выбор. */
   const checkShouldShow = useCallback(() => {
-    // Дополнительная защита: Providers тоже не вызывает функцию до авторизации.
     if (!vkUser) return;
 
     const firstVisit = getRaw<boolean>(STORAGE_FIRST_VISIT);
@@ -42,7 +60,6 @@ export function useNotification() {
     }
   }, [vkUser]);
 
-  /** Показать попап после отправки ответа, пока пользователь не сделал выбор. */
   const showAfterSubmit = useCallback(() => {
     if (!vkUser) return;
 
@@ -52,29 +69,16 @@ export function useNotification() {
     }
   }, [vkUser]);
 
-  /**
-   * Запросить разрешение от VK и сохранить subscribed=true.
-   *
-   * Запрос намеренно не выполняется, пока отсутствует vkUser: без реального
-   * VK ID вызов Bridge происходил как anonymous и возвращал client_error.
-   */
   const request = useCallback(async () => {
-    if (!vkUser || requesting) {
-      return false;
-    }
+    if (!vkUser || requesting) return false;
 
     setRequesting(true);
     await logEvent('notification_request', { vk_id: vkUser.id });
 
     try {
-      const allowed = await requestNotifications();
+      // При client_error requestNotifications бросит raw ошибку VK Bridge.
+      await requestNotifications();
       setRaw(STORAGE_NOTIF_REQUESTED, true);
-
-      if (!allowed) {
-        await logEvent('notification_denied', { vk_id: vkUser.id });
-        setShowPopup(false);
-        return false;
-      }
 
       const timestamp = nowISO();
       const updatedUser: UserRecord = {
@@ -85,7 +89,6 @@ export function useNotification() {
         last_activity: timestamp,
       };
 
-      // Даже когда userRecord был null на первом визите, обновляем/создаём строку.
       await sheetsApi.saveUser(updatedUser);
       setUserRecord(updatedUser);
       await logEvent('notification_granted', { vk_id: vkUser.id });
@@ -93,17 +96,22 @@ export function useNotification() {
       setShowPopup(false);
       return true;
     } catch (error) {
+      // ВАЖНО: сохраняем все поля VK ошибки, а не только строку message.
       await logEvent('notification_denied', {
         vk_id: vkUser.id,
-        error: error instanceof Error ? error.message : String(error),
+        bridge_error: serializeBridgeError(error),
       });
+
+      // Пользователь уже сделал выбор/получил ошибку VK — повторно не показываем
+      // тот же попап до очистки localStorage.
+      setRaw(STORAGE_NOTIF_REQUESTED, true);
+      setShowPopup(false);
       return false;
     } finally {
       setRequesting(false);
     }
   }, [requesting, setUserRecord, userRecord, vkUser]);
 
-  /** Пользователь закрыл попап без выдачи разрешения. */
   const dismiss = useCallback(() => {
     setRaw(STORAGE_NOTIF_REQUESTED, true);
     setShowPopup(false);

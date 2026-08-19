@@ -1,7 +1,10 @@
 /**
  * src/lib/vk/bridge.ts — инициализация и обёртка над VK Bridge.
  *
- * Совместимо с типами @vkontakte/vk-bridge 2.12.x.
+ * Диагностика уведомлений:
+ * requestNotifications НЕ скрывает ошибку VK Bridge. Ошибка пробрасывается
+ * в useNotification.ts, где будет записана вместе с полями error_type,
+ * error_data и message в накопленный лог.
  */
 
 import vkBridge from '@vkontakte/vk-bridge';
@@ -10,7 +13,6 @@ import { MOCK_MODE } from '@/constants';
 
 let initialized = false;
 
-/** Инициализировать VK Bridge один раз. */
 export function initBridge(): void {
   if (MOCK_MODE || initialized) return;
 
@@ -22,7 +24,6 @@ export function initBridge(): void {
   }
 }
 
-/** Получить данные пользователя VK. */
 export async function getUserInfo(): Promise<VKUserInfo | null> {
   if (MOCK_MODE) {
     return {
@@ -52,11 +53,7 @@ export async function getUserInfo(): Promise<VKUserInfo | null> {
   }
 }
 
-/** Проверить репост через Apps Script и VK API. */
-export async function checkRepost(
-  vkId: string,
-  postId: string,
-): Promise<boolean> {
+export async function checkRepost(vkId: string, postId: string): Promise<boolean> {
   if (MOCK_MODE) return true;
 
   try {
@@ -68,7 +65,13 @@ export async function checkRepost(
   }
 }
 
-/** Запросить разрешение на уведомления. */
+/**
+ * Запросить разрешение на уведомления.
+ *
+ * При ошибке намеренно пробрасывает raw error VK Bridge наверх, а не возвращает
+ * false: useNotification сохранит подробности в лог, включая error_type и
+ * error_data, чтобы можно было определить настоящую причину client_error.
+ */
 export async function requestNotifications(): Promise<boolean> {
   if (MOCK_MODE) return true;
 
@@ -77,16 +80,13 @@ export async function requestNotifications(): Promise<boolean> {
     return true;
   } catch (error) {
     console.warn('[vk-bridge] allowNotifications failed:', error);
-    return false;
+    throw error;
   }
 }
 
 /**
  * Открыть системный диалог создания записи на стене пользователя.
- *
- * В типах установленного @vkontakte/vk-bridge нет метода VKWebAppAddWallPost,
- * поэтому здесь используется совместимый VKWebAppShowWallPostBox.
- * Параметр message передаёт ссылку/текст поста конкурса в поле новой записи.
+ * Совместимо с установленной версией @vkontakte/vk-bridge.
  */
 export async function addWallPost(postId: string): Promise<boolean> {
   if (MOCK_MODE) return true;
