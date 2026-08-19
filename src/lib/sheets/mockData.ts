@@ -148,7 +148,6 @@ export const mockCards: CardRecord[] = [
 
 /** Тестовая статистика для /admin/stats. */
 export const mockStats: CardStat[] = [
-  {
 {
   card_id: '1',
   title: 'Логическая задача: животные и зоны',
