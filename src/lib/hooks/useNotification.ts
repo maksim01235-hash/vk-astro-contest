@@ -1,8 +1,11 @@
 /**
  * src/lib/hooks/useNotification.ts — запрос разрешения на уведомления.
  *
- * При успешном разрешении subscribed=true всегда отправляется в Sheets,
- * даже если userRecord ещё не успел появиться в Zustand на первом визите.
+ * Особенности:
+ *  - Попап показывается только после готовности vkUser (контролирует Providers).
+ *  - request дополнительно защищён от вызова без vkUser.
+ *  - При успешном разрешении subscribed=true всегда записывается в Sheets,
+ *    включая первый визит, когда userRecord ещё может быть null.
  */
 
 'use client';
@@ -24,6 +27,9 @@ export function useNotification() {
 
   /** Показать попап на первом визите, если пользователь ещё не сделал выбор. */
   const checkShouldShow = useCallback(() => {
+    // Дополнительная защита: Providers тоже не вызывает функцию до авторизации.
+    if (!vkUser) return;
+
     const firstVisit = getRaw<boolean>(STORAGE_FIRST_VISIT);
     const requested = getRaw<boolean>(STORAGE_NOTIF_REQUESTED);
 
@@ -34,69 +40,70 @@ export function useNotification() {
     if (!requested) {
       setShowPopup(true);
     }
-  }, []);
+  }, [vkUser]);
 
   /** Показать попап после отправки ответа, пока пользователь не сделал выбор. */
   const showAfterSubmit = useCallback(() => {
+    if (!vkUser) return;
+
     const requested = getRaw<boolean>(STORAGE_NOTIF_REQUESTED);
     if (!requested) {
       setShowPopup(true);
     }
-  }, []);
+  }, [vkUser]);
 
   /**
-   * Запросить разрешение и сохранить subscribed=true.
+   * Запросить разрешение от VK и сохранить subscribed=true.
    *
-   * Важно: на первом визите userRecord может быть null из-за асинхронного
-   * checkUser. Тогда собираем запись из vkUser, а saveUser на сервере
-   * обновит существующую строку по vk_id или создаст её при необходимости.
+   * Запрос намеренно не выполняется, пока отсутствует vkUser: без реального
+   * VK ID вызов Bridge происходил как anonymous и возвращал client_error.
    */
   const request = useCallback(async () => {
+    if (!vkUser || requesting) {
+      return false;
+    }
+
     setRequesting(true);
-    await logEvent('notification_request', { vk_id: vkUser?.id });
+    await logEvent('notification_request', { vk_id: vkUser.id });
 
     try {
       const allowed = await requestNotifications();
       setRaw(STORAGE_NOTIF_REQUESTED, true);
 
-      if (allowed && vkUser) {
-        const timestamp = nowISO();
-        const updatedUser: UserRecord = {
-          vk_id: vkUser.id,
-          name: userRecord?.name || vkUser.name || `${vkUser.first_name} ${vkUser.last_name}`.trim(),
-          reg_date: userRecord?.reg_date || timestamp,
-          subscribed: true,
-          last_activity: timestamp,
-        };
-
-        // Всегда вызывается при разрешении — независимо от наличия userRecord.
-        await sheetsApi.saveUser(updatedUser);
-        setUserRecord(updatedUser);
-        await logEvent('notification_granted', { vk_id: vkUser.id });
-      } else if (allowed) {
-        // Разрешение получено, но VK-пользователь временно недоступен.
-        await logEvent('notification_granted', {
-          vk_id: 'anonymous',
-          warning: 'vkUser is unavailable; subscribed was not saved to Users',
-        });
-      } else {
-        await logEvent('notification_denied', { vk_id: vkUser?.id });
+      if (!allowed) {
+        await logEvent('notification_denied', { vk_id: vkUser.id });
+        setShowPopup(false);
+        return false;
       }
 
+      const timestamp = nowISO();
+      const updatedUser: UserRecord = {
+        vk_id: vkUser.id,
+        name: userRecord?.name || vkUser.name || `${vkUser.first_name} ${vkUser.last_name}`.trim(),
+        reg_date: userRecord?.reg_date || timestamp,
+        subscribed: true,
+        last_activity: timestamp,
+      };
+
+      // Даже когда userRecord был null на первом визите, обновляем/создаём строку.
+      await sheetsApi.saveUser(updatedUser);
+      setUserRecord(updatedUser);
+      await logEvent('notification_granted', { vk_id: vkUser.id });
+
       setShowPopup(false);
-      return allowed;
+      return true;
     } catch (error) {
       await logEvent('notification_denied', {
-        vk_id: vkUser?.id,
+        vk_id: vkUser.id,
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
     } finally {
       setRequesting(false);
     }
-  }, [setUserRecord, userRecord, vkUser]);
+  }, [requesting, setUserRecord, userRecord, vkUser]);
 
-  /** Пользователь закрыл попап без запроса разрешения. */
+  /** Пользователь закрыл попап без выдачи разрешения. */
   const dismiss = useCallback(() => {
     setRaw(STORAGE_NOTIF_REQUESTED, true);
     setShowPopup(false);

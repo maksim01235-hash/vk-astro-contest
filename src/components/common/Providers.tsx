@@ -1,8 +1,9 @@
 /**
- * components/common/Providers.tsx — клиентский провайдер.
+ * src/components/common/Providers.tsx — глобальный клиентский провайдер.
  *
- * Инициализирует VK Bridge и Zustand hydrate ровно один раз,
- * показывает Toast/NotificationModal, синхронизирует офлайн-очередь.
+ * Важно: попап разрешения уведомлений показывается только после появления
+ * vkUser. Иначе VKWebAppAllowNotifications вызывается слишком рано и VK
+ * возвращает client_error.
  */
 
 'use client';
@@ -20,23 +21,35 @@ import { getRaw, setRaw } from '@/utils/storage';
 import type { AnswerRecord } from '@/types';
 
 export function Providers({ children }: { children: ReactNode }) {
-  const hydrate = useUserStore((s) => s.hydrate);
-  const { checkShouldShow, showPopup, request, dismiss, requesting } =
-    useNotification();
+  const hydrate = useUserStore((state) => state.hydrate);
+  const vkUser = useUserStore((state) => state.vkUser);
+  const {
+    checkShouldShow,
+    showPopup,
+    request,
+    dismiss,
+    requesting,
+  } = useNotification();
   const [mounted, setMounted] = useState(false);
 
-  /**
-   * Единственная точка начальной инициализации приложения.
-   * useAuth не дублирует initBridge/hydrate.
-   */
+  /** Инициализация VK Bridge и восстановление локального пользователя. */
   useEffect(() => {
     initBridge();
     hydrate();
-    checkShouldShow();
     setMounted(true);
-  }, [hydrate, checkShouldShow]);
+  }, [hydrate]);
 
-  /** Отправить офлайн-очередь после восстановления сети. */
+  /**
+   * Попап уведомлений разрешено показывать только после авторизации.
+   * Когда vkUser отсутствует, вызов VKWebAppAllowNotifications может завершиться
+   * client_error: Bridge ещё не готов работать от имени конкретного пользователя.
+   */
+  useEffect(() => {
+    if (!mounted || !vkUser) return;
+    checkShouldShow();
+  }, [mounted, vkUser, checkShouldShow]);
+
+  /** Отправить сохранённую офлайн-очередь после восстановления сети. */
   useEffect(() => {
     if (!mounted) return;
 
@@ -48,8 +61,8 @@ export function Providers({ children }: { children: ReactNode }) {
         await sheetsApi.syncOffline(queue);
         setRaw(STORAGE_OFFLINE_QUEUE, []);
         await logEvent('offline_sync', { count: queue.length });
-      } catch (e) {
-        console.warn('[providers] offline sync failed:', e);
+      } catch (error) {
+        console.warn('[providers] offline sync failed:', error);
       }
     };
 
