@@ -1,37 +1,28 @@
 /**
- * lib/vk/bridge.ts — инициализация и обёртка над VK Bridge.
+ * src/lib/vk/bridge.ts — инициализация и обёртка над VK Bridge.
  *
- * Исправления (август 2026):
- *  - В mock-режиме убран недоступный внешний placeholder-аватар,
- *    вызывавший ошибку GET https://via.placeholder.com/200 ERR_CONNECTION_CLOSED.
+ * Совместимо с типами @vkontakte/vk-bridge 2.12.x.
  */
 
 import vkBridge from '@vkontakte/vk-bridge';
 import type { VKUserInfo } from '@/types';
 import { MOCK_MODE } from '@/constants';
 
-/** Флаг: инициализирован ли VK Bridge. */
 let initialized = false;
 
-/**
- * Инициализирует VK Bridge (VKWebAppInit).
- * Должна вызываться один раз при старте приложения.
- * В mock-режиме — no-op.
- */
+/** Инициализировать VK Bridge один раз. */
 export function initBridge(): void {
   if (MOCK_MODE || initialized) return;
+
   try {
-    vkBridge.send('VKWebAppInit', {});
+    void vkBridge.send('VKWebAppInit', {});
     initialized = true;
-  } catch (e) {
-    console.warn('[vk-bridge] init failed:', e);
+  } catch (error) {
+    console.warn('[vk-bridge] init failed:', error);
   }
 }
 
-/**
- * Получает информацию о пользователе (VKWebAppGetUserInfo).
- * @returns VKUserInfo или null, если не внутри VK.
- */
+/** Получить данные пользователя VK. */
 export async function getUserInfo(): Promise<VKUserInfo | null> {
   if (MOCK_MODE) {
     return {
@@ -39,7 +30,6 @@ export async function getUserInfo(): Promise<VKUserInfo | null> {
       first_name: 'Тест',
       last_name: 'Пользователь',
       name: 'Тест Пользователь',
-      // Не используем via.placeholder.com: сервис может быть недоступен.
       photo_200: '',
       sex: 1,
     };
@@ -47,7 +37,8 @@ export async function getUserInfo(): Promise<VKUserInfo | null> {
 
   try {
     const data = await vkBridge.send('VKWebAppGetUserInfo', {});
-    const user: VKUserInfo = {
+
+    return {
       id: String(data.id),
       first_name: data.first_name || '',
       last_name: data.last_name || '',
@@ -55,57 +46,58 @@ export async function getUserInfo(): Promise<VKUserInfo | null> {
       photo_200: data.photo_200 || data.photo_100 || '',
       sex: data.sex,
     };
-    return user;
-  } catch (e) {
-    console.warn('[vk-bridge] getUserInfo failed:', e);
+  } catch (error) {
+    console.warn('[vk-bridge] getUserInfo failed:', error);
     return null;
   }
 }
 
-/**
- * Проверяет, сделал ли пользователь репост поста через Apps Script.
- */
+/** Проверить репост через Apps Script и VK API. */
 export async function checkRepost(
   vkId: string,
   postId: string,
 ): Promise<boolean> {
   if (MOCK_MODE) return true;
+
   try {
     const { sheetsApi } = await import('../sheets/api.client');
     return await sheetsApi.checkRepost(vkId, postId);
-  } catch (e) {
-    console.warn('[vk-bridge] checkRepost failed:', e);
+  } catch (error) {
+    console.warn('[vk-bridge] checkRepost failed:', error);
     return false;
   }
 }
 
-/**
- * Запрос разрешения на уведомления (VKWebAppAllowNotifications).
- */
+/** Запросить разрешение на уведомления. */
 export async function requestNotifications(): Promise<boolean> {
   if (MOCK_MODE) return true;
+
   try {
     await vkBridge.send('VKWebAppAllowNotifications', {});
     return true;
-  } catch (e) {
-    console.warn('[vk-bridge] allowNotifications failed:', e);
+  } catch (error) {
+    console.warn('[vk-bridge] allowNotifications failed:', error);
     return false;
   }
 }
 
 /**
- * Сделать репост поста на стену (VKWebAppAddWallPost).
+ * Открыть системный диалог создания записи на стене пользователя.
+ *
+ * В типах установленного @vkontakte/vk-bridge нет метода VKWebAppAddWallPost,
+ * поэтому здесь используется совместимый VKWebAppShowWallPostBox.
+ * Параметр message передаёт ссылку/текст поста конкурса в поле новой записи.
  */
 export async function addWallPost(postId: string): Promise<boolean> {
   if (MOCK_MODE) return true;
+
   try {
-    await vkBridge.send('VKWebAppAddWallPost', {
-      post_id: postId,
-      message: 'Участвую в конкурсе!',
+    await vkBridge.send('VKWebAppShowWallPostBox', {
+      message: `Участвую в конкурсе! Пост конкурса: ${postId}`,
     });
     return true;
-  } catch (e) {
-    console.warn('[vk-bridge] addWallPost failed:', e);
+  } catch (error) {
+    console.warn('[vk-bridge] addWallPost failed:', error);
     return false;
   }
 }
