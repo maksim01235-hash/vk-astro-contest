@@ -75,7 +75,6 @@ export function useNotification() {
         await logEvent('notification_granted', { vk_id: vkUser.id });
       } else if (allowed) {
         // Разрешение получено, но VK-пользователь временно недоступен.
-        // Не падаем, но записываем диагностический лог в память.
         await logEvent('notification_granted', {
           vk_id: 'anonymous',
           warning: 'vkUser is unavailable; subscribed was not saved to Users',

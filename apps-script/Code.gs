@@ -12,6 +12,7 @@
  *  - Feedback записывается отдельными строками в лист Feedback.
  *  - Статистика считает уникальных ответивших пользователей.
  *  - Считает участников конкурса, подписанных на группу VK.
+ *  - updateRow ищет ключ по РЕАЛЬНОМУ индексу столбца, а не по нулевому.
  *
  * Script Properties:
  *  VK_SERVICE_TOKEN              — service token VK API.
@@ -146,6 +147,12 @@ function appendRow(name, obj) {
   }));
 }
 
+/**
+ * Обновляет строку по совпадению значения в столбце key.
+ * ВАЖНО: индекс столбца key вычисляется через headers.indexOf(key),
+ * а не всегда берётся из нулевого столбца — иначе updateRow ломается
+ * для любых листов, где искомый ключ не находится в первом столбце.
+ */
 function updateRow(name, key, value, updates) {
   var sheet = getSheet(name);
   var data = sheet.getDataRange().getValues();
@@ -289,6 +296,10 @@ function checkUser(vkId, name) {
   return user;
 }
 
+/**
+ * Сохраняет пользователя. Используется для subscribed=true из useNotification.
+ * findRow/updateRow теперь корректно ищут vk_id по его реальному индексу столбца.
+ */
 function saveUser(user) {
   if (!user.vk_id) throw new Error('vk_id is required');
 
@@ -322,7 +333,6 @@ function normalizeUserAnswer(rawAnswer) {
   try {
     parsed = JSON.parse(rawAnswer);
   } catch (error) {
-    // Уже обычная строка.
     return rawAnswer;
   }
 
@@ -332,12 +342,6 @@ function normalizeUserAnswer(rawAnswer) {
   var dnd = parsed.dnd || {};
   var dndKeys = Object.keys(dnd);
 
-  /**
-   * Важное правило:
-   * DnD считается существующим, когда в объекте dnd есть хотя бы один ключ.
-   * DnDContainer всегда передаёт unassigned при наличии DnD-объектов,
-   * поэтому даже пустой ответ DnD-карточки сохраняет весь JSON.
-   */
   if (dndKeys.length > 0) {
     return JSON.stringify({
       inputs: inputs,
@@ -378,7 +382,6 @@ function saveAnswer(answer) {
     has_reposted: answer.has_reposted || false,
   });
 
-  // Лог пишется только как часть отправки ответа.
   if (answer.log && Array.isArray(answer.log) && answer.log.length > 0) {
     writeLog(answer.vk_id, answer.log);
   }
@@ -392,8 +395,6 @@ function saveAnswer(answer) {
  *   A — vk_id
  *   B — timestamp
  *   C — JSON массива накопленных событий.
- *
- * Старые 7-колоночные строки не трогаются и остаются архивом.
  */
 function writeLog(vkId, events) {
   var sheet = getSheet(SHEET_LOGS);
@@ -425,7 +426,6 @@ function saveFeedback(feedback) {
     message: String(feedback.message).trim(),
   });
 
-  // Лог пишется только как часть отправки обратной связи.
   if (feedback.log && Array.isArray(feedback.log) && feedback.log.length > 0) {
     writeLog(feedback.vk_id || 'anonymous', feedback.log);
   }
