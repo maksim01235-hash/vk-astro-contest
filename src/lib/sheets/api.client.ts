@@ -1,25 +1,24 @@
 /**
- * lib/sheets/api.client.ts — клиент Google Apps Script REST API.
+ * src/lib/sheets/api.client.ts — клиент Google Apps Script REST API.
  *
- * Обновления (v2):
- *  - saveFeedback: принимает log (массив LogRecord).
+ * Логи передаются только вместе с ответом или обратной связью.
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import {
-  SHEETS_API_URL,
-  REQUEST_TIMEOUT_MS,
-  RETRY_COUNT,
-  RETRY_BASE_DELAY_MS,
   API_ACTIONS,
+  REQUEST_TIMEOUT_MS,
+  RETRY_BASE_DELAY_MS,
+  RETRY_COUNT,
+  SHEETS_API_URL,
 } from '@/constants';
 import type {
-  CardRecord,
-  UserRecord,
   AnswerRecord,
-  LogRecord,
-  CardStat,
   ApiResponse,
+  CardRecord,
+  CardStat,
+  LogRecord,
+  UserRecord,
 } from '@/types';
 
 function delay(ms: number): Promise<void> {
@@ -34,25 +33,36 @@ const client: AxiosInstance = axios.create({
 
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < RETRY_COUNT; attempt++) {
+
+  for (let attempt = 0; attempt < RETRY_COUNT; attempt += 1) {
     try {
       return await fn();
-    } catch (e) {
-      lastError = e;
-      const isNetwork = e instanceof AxiosError && !e.response;
-      const is5xx = e instanceof AxiosError && !!e.response && e.response.status >= 500;
-      if (!isNetwork && !is5xx) throw e;
+    } catch (error) {
+      lastError = error;
+      const isNetwork = error instanceof AxiosError && !error.response;
+      const is5xx = error instanceof AxiosError && !!error.response && error.response.status >= 500;
+
+      if (!isNetwork && !is5xx) throw error;
       if (attempt < RETRY_COUNT - 1) {
         await delay(RETRY_BASE_DELAY_MS * Math.pow(2, attempt));
       }
     }
   }
+
   throw lastError;
 }
 
 function parseResponse<T>(raw: unknown): T {
-  if (typeof raw === 'string') return JSON.parse(raw) as T;
-  return raw as T;
+  return typeof raw === 'string' ? JSON.parse(raw) as T : raw as T;
+}
+
+async function get<T>(action: string, params: Record<string, string> = {}): Promise<T> {
+  const response = await withRetry(() =>
+    client.get('', { params: { action, ...params } }),
+  );
+  const result = parseResponse<ApiResponse<T>>(response.data);
+  if (!result.ok) throw new Error(result.error || `${action} failed`);
+  return result.data as T;
 }
 
 async function post<T = unknown>(action: string, body: unknown): Promise<T> {
@@ -66,41 +76,26 @@ async function post<T = unknown>(action: string, body: unknown): Promise<T> {
 
 export const sheetsApi = {
   async getCards(): Promise<CardRecord[]> {
-    const response = await withRetry(() =>
-      client.get('', { params: { action: API_ACTIONS.GET_CARDS } }),
-    );
-    const result = parseResponse<ApiResponse<CardRecord[]>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'getCards failed');
-    return result.data || [];
+    const data = await get<CardRecord[]>(API_ACTIONS.GET_CARDS);
+    return data || [];
   },
 
   async getCardsList(): Promise<Array<{ card_id: string; title: string; is_active: boolean }>> {
-    const response = await withRetry(() =>
-      client.get('', { params: { action: API_ACTIONS.GET_CARDS_LIST } }),
+    const data = await get<Array<{ card_id: string; title: string; is_active: boolean }>>(
+      API_ACTIONS.GET_CARDS_LIST,
     );
-    const result = parseResponse<ApiResponse<Array<{ card_id: string; title: string; is_active: boolean }>>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'getCardsList failed');
-    return result.data || [];
+    return data || [];
   },
 
   async getCard(cardId: string): Promise<CardRecord | null> {
-    const response = await withRetry(() =>
-      client.get('', { params: { action: API_ACTIONS.GET_CARD, id: cardId } }),
-    );
-    const result = parseResponse<ApiResponse<CardRecord>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'getCard failed');
-    return result.data || null;
+    return get<CardRecord | null>(API_ACTIONS.GET_CARD, { id: cardId });
   },
 
   async checkUser(vkId: string, name?: string): Promise<UserRecord> {
-    const response = await withRetry(() =>
-      client.get('', {
-        params: { action: API_ACTIONS.CHECK_USER, vk_id: vkId, name: name || '' },
-      }),
-    );
-    const result = parseResponse<ApiResponse<UserRecord>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'checkUser failed');
-    return result.data as UserRecord;
+    return get<UserRecord>(API_ACTIONS.CHECK_USER, {
+      vk_id: vkId,
+      name: name || '',
+    });
   },
 
   async saveUser(user: UserRecord): Promise<void> {
@@ -122,12 +117,8 @@ export const sheetsApi = {
   },
 
   async getStats(): Promise<CardStat[]> {
-    const response = await withRetry(() =>
-      client.get('', { params: { action: API_ACTIONS.GET_STATS } }),
-    );
-    const result = parseResponse<ApiResponse<CardStat[]>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'getStats failed');
-    return result.data || [];
+    const data = await get<CardStat[]>(API_ACTIONS.GET_STATS);
+    return data || [];
   },
 
   async saveCard(card: CardRecord): Promise<void> {
@@ -135,27 +126,19 @@ export const sheetsApi = {
   },
 
   async checkRepost(vkId: string, postId: string): Promise<boolean> {
-    const response = await withRetry(() =>
-      client.get('', {
-        params: { action: API_ACTIONS.CHECK_REPOST, vk_id: vkId, post_id: postId },
-      }),
-    );
-    const result = parseResponse<ApiResponse<boolean>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'checkRepost failed');
-    return result.data === true;
+    return get<boolean>(API_ACTIONS.CHECK_REPOST, {
+      vk_id: vkId,
+      post_id: postId,
+    });
   },
 
   async getServerTime(): Promise<string> {
-    const response = await withRetry(() =>
-      client.get('', { params: { action: API_ACTIONS.GET_SERVER_TIME } }),
-    );
-    const result = parseResponse<ApiResponse<{ iso: string }>>(response.data);
-    if (!result.ok) throw new Error(result.error || 'getServerTime failed');
-    return result.data?.iso || new Date().toISOString();
+    const data = await get<{ iso: string }>(API_ACTIONS.GET_SERVER_TIME);
+    return data?.iso || new Date().toISOString();
   },
 
   async syncOffline(answers: AnswerRecord[]): Promise<number> {
-    const result = await post<{ saved: number }>(API_ACTIONS.SYNC_OFFLINE, { answers });
-    return result?.saved || 0;
+    const data = await post<{ saved: number }>(API_ACTIONS.SYNC_OFFLINE, { answers });
+    return data?.saved || 0;
   },
 };

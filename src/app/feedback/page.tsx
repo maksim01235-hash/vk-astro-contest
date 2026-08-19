@@ -1,17 +1,16 @@
 /**
- * app/feedback/page.tsx — форма обратной связи.
+ * src/app/feedback/page.tsx — форма обратной связи.
  *
- * Обновления (v2):
- *  - Передача log вместе с feedback.
+ * Накопленный лог передаётся одним запросом вместе с обратной связью.
  */
 
 'use client';
 
-import { useState, Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { useUserStore } from '@/lib/store/userStore';
-import { getLogBuffer, clearLogBuffer } from '@/lib/sheets/logger';
+import { clearLogBuffer, getLogBuffer, logEvent } from '@/lib/sheets/logger';
 import { useToast } from '@/components/ui/Toast';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -25,11 +24,12 @@ function FeedbackContent() {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!message.trim() || submitting) return;
 
     setSubmitting(true);
+
     try {
       const log = getLogBuffer();
 
@@ -41,12 +41,19 @@ function FeedbackContent() {
         log,
       });
 
-      toast.success('Спасибо за отзыв!');
       clearLogBuffer();
+      toast.success('Спасибо за отзыв!');
       setName('');
       setMessage('');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось отправить отзыв');
+    } catch (feedbackError) {
+      const errorMessage = feedbackError instanceof Error
+        ? feedbackError.message
+        : 'Не удалось отправить отзыв';
+      await logEvent('api_error', {
+        action: 'saveFeedback',
+        error: errorMessage,
+      });
+      toast.error(errorMessage);
     } finally {
       setSubmitting(false);
     }
@@ -59,7 +66,7 @@ function FeedbackContent() {
         <Input
           label="Ваше имя"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(event) => setName(event.target.value)}
           placeholder="Как вас зовут"
         />
         <div className="flex flex-col gap-1.5">
@@ -67,14 +74,12 @@ function FeedbackContent() {
           <textarea
             className="input-field min-h-[120px] resize-y"
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(event) => setMessage(event.target.value)}
             placeholder="Напишите отзыв или предложение"
             required
           />
         </div>
-        <Button type="submit" loading={submitting}>
-          Отправить
-        </Button>
+        <Button type="submit" loading={submitting}>Отправить</Button>
       </form>
     </div>
   );

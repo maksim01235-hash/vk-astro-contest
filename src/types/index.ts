@@ -1,9 +1,10 @@
 /**
- * types/index.ts — глобальные TypeScript-интерфейсы.
+ * types/index.ts — глобальные TypeScript-интерфейсы для всего приложения.
  *
- * Обновления (v2):
- *  - ImageBlock: добавлены maxImageWidth, maxImageHeight.
- *  - CardStat: добавлено subscribed_count.
+ * Обновления (v3, август 2026):
+ *  - ImageBlock: раздельные maxImageWidth/maxImageHeight, viewer (полноэкранный просмотр с зумом).
+ *  - DragObjectBlock: label опционален, textPosition, maxImageSize/imageSize (накоплено из прошлых правок).
+ *  - CardStat: subscribed_count (уведомления) + subscribed_group_count (подписка на группу VK).
  */
 
 export interface VKUserInfo {
@@ -52,13 +53,21 @@ export interface TextBlock extends BaseBlock {
   content: string;
 }
 
+/** Картинка. */
 export interface ImageBlock extends BaseBlock {
   type: 'ImageBlock';
+  /** URL изображения. */
   src: string;
+  /** Alt-текст (для screen-readers и fallback при ошибке загрузки). */
   alt?: string;
+  /** Ширина в px или 'full'. */
   width?: number | 'full';
+  /** Максимальная ширина картинки (px). Раздельно от высоты. */
   maxImageWidth?: number;
+  /** Максимальная высота картинки (px). Раздельно от ширины. */
   maxImageHeight?: number;
+  /** Показывать кнопку полноэкранного просмотра с зумом/панорамированием. */
+  viewer?: boolean;
 }
 
 export interface InputFieldBlock extends BaseBlock {
@@ -84,16 +93,22 @@ export interface DragZoneBlock extends BaseBlock {
   maxItems?: number;
 }
 
+/** Положение текста относительно изображения в DragObject. */
 export type TextPosition = 'left' | 'right' | 'top' | 'bottom';
 
+/** Объект для перетаскивания. */
 export interface DragObjectBlock extends BaseBlock {
   type: 'DragObject';
   objectId: string;
+  /** Текст объекта (опционально — можно оставить только картинку). */
   label?: string;
+  /** Положение текста относительно изображения. */
   textPosition?: TextPosition;
   allowedZones: string[];
   image?: string;
+  /** Максимальный размер картинки для автоподстройки (px, квадратное ограничение). */
   maxImageSize?: number;
+  /** Фиксированный размер картинки (px, приоритетнее maxImageSize). */
   imageSize?: number;
 }
 
@@ -136,12 +151,17 @@ export interface ApiResponse<T = unknown> {
   error?: string;
 }
 
+/** Статистика по карточке для /admin/stats. */
 export interface CardStat {
   card_id: string;
   title: string;
   total_answers: number;
   total_users: number;
+  /** Число подписавшихся на уведомления (VKWebAppAllowNotifications). */
   subscribed_count: number;
+  /** Число участников конкурса, состоящих в группе VK (через groups.isMember). */
+  subscribed_group_count: number;
+  /** Процент уникальных пользователей, отправивших ответ (не общее число попыток). */
   pct_answered: number;
   avg_delta: number;
   min_delta: number;

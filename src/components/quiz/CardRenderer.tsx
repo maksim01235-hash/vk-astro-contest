@@ -1,43 +1,35 @@
 /**
- * components/quiz/CardRenderer.tsx — рендерит карточку по JSON-схеме.
- * Проходит по массиву блоков в их порядке (по полю order) и рендерит
- * соответствующий компонент по type. DnD-блоки (DragZone, DragObject)
- * группируются в один DnDContainer в месте их первого появления.
+ * src/components/quiz/CardRenderer.tsx — рендерит карточку по JSON-схеме.
  *
- * Сбор данных при отправке — из refs всех блоков.
- *
- * Обновления (август 2026):
- *  - Схлопывание user_answer перед отправкой:
- *    * dnd не пуст → полный формат {"inputs":{...},"dnd":{...}}.
- *    * dnd пуст, один input → просто значение.
- *    * dnd пуст, несколько inputs → склейка через ";" в порядке answerKey.
+ * Формат ответа:
+ *  - Карточка содержит хотя бы один DnD-блок → всегда полный JSON { inputs, dnd },
+ *    включая пустое состояние и unassigned-объекты.
+ *  - DnD-блоков нет, одно текстовое поле → его значение без JSON-обёртки.
+ *  - DnD-блоков нет, несколько текстовых полей → значения через ";".
  */
 
 'use client';
 
-import { Block, CardSchema, DnDState, AnswerPayload } from '@/types';
+import type { Block, CardSchema, DnDState, AnswerPayload } from '@/types';
 import { TextBlockView } from './blocks/TextBlock';
 import { ImageBlockView } from './blocks/ImageBlock';
 import { InputFieldView } from './blocks/InputField';
 import { ButtonView } from './blocks/Button';
 import { DnDContainer } from './DnDContainer';
 import { safeParse } from '@/utils/json';
-import { useRef, useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 
 interface CardRendererProps {
-  jsonSchema: string; // JSON-строка из Sheets
+  jsonSchema: string;
   onSubmit: (payload: AnswerPayload) => void;
   submitting: boolean;
 }
 
 export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererProps) {
   const schema = safeParse<CardSchema>(jsonSchema, { blocks: [] });
-  // Рефы для сбора данных с блоков.
   const inputsRef = useRef<Record<string, string>>({});
   const dndRef = useRef<DnDState>({});
 
-  // Стабильная ссылка на колбэк — не пересоздаётся между рендерами,
-  // поэтому useEffect внутри DnDContainer не перезапускается впустую.
   const handleDndStateChange = useCallback((state: DnDState) => {
     dndRef.current = state;
   }, []);
@@ -50,64 +42,65 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
     );
   }
 
+  const sortedBlocks = [...schema.blocks].sort((a, b) => a.order - b.order);
+
   /**
-   * Собрать данные со всех блоков, схлопнуть user_answer и вызвать onSubmit.
+   * DnD-формат определяется по СХЕМЕ карточки, а не по тому,
+   * размещал ли пользователь объекты. Это сохраняет полную структуру
+   * даже при пустом ответе: { inputs: {}, dnd: { unassigned: [...] } }.
    */
+  const cardHasDnd = sortedBlocks.some(
+    (block) => block.type === 'DragZone' || block.type === 'DragObject',
+  );
+
   const handleSubmit = () => {
     const inputs = { ...inputsRef.current };
     const dnd = { ...dndRef.current };
 
-    // Проверяем, пуст ли dnd (игнорируем unassigned).
-    let dndEmpty = true;
-    for (const key of Object.keys(dnd)) {
-      if (key !== 'unassigned' && dnd[key].length > 0) {
-        dndEmpty = false;
-        break;
-      }
+    if (cardHasDnd) {
+      // В DnD-карточке всегда оставляем полный JSON.
+      // Ключи dnd — это zoneId корзин, плюс unassigned для нераспределённых объектов.
+      onSubmit({ inputs, dnd });
+      return;
     }
 
-    let payload: AnswerPayload;
+    const inputKeys = Object.keys(inputs).sort();
 
-    if (!dndEmpty) {
-      // DnD не пуст → полный формат.
-      payload = { inputs, dnd };
-    } else {
-      // DnD пуст → схлопываем inputs.
-      const keys = Object.keys(inputs);
-      if (keys.length === 1) {
-        // Один input → просто значение (передаём как строку в inputs, но на сервере схлопнется).
-        payload = { inputs: { answer: inputs[keys[0]] }, dnd: {} };
-      } else if (keys.length > 1) {
-        // Несколько inputs → склейка через ";" в порядке keys.
-        keys.sort();
-        const joined = keys.map((k) => inputs[k]).join(';');
-        payload = { inputs: { answer: joined }, dnd: {} };
-      } else {
-        // Нет inputs и dnd пуст → пустой payload.
-        payload = { inputs: {}, dnd: {} };
-      }
+    if (inputKeys.length === 1) {
+      // Один текстовый ответ: сервер сохранит чистую строку.
+      onSubmit({
+        inputs: { answer: inputs[inputKeys[0]] },
+        dnd: {},
+      });
+      return;
     }
 
-    onSubmit(payload);
+    if (inputKeys.length > 1) {
+      // Несколько текстовых полей: значения в стабильном порядке через ";".
+      onSubmit({
+        inputs: { answer: inputKeys.map((key) => inputs[key]).join(';') },
+        dnd: {},
+      });
+      return;
+    }
+
+    // Карточка без текстовых полей и без DnD.
+    onSubmit({ inputs: {}, dnd: {} });
   };
 
-  // Сортируем блоки по order, чтобы сохранить порядок из схемы.
-  const sortedBlocks = [...schema.blocks].sort((a, b) => a.order - b.order);
-
-  // Рендерим блоки по порядку. DnD-блоки группируем: при первом DnD-блоке
-  // рендерим DnDContainer со всеми DnD-блоками, остальные пропускаем.
   let dndRendered = false;
 
   return (
     <div className="flex flex-col gap-4 animate-fade-in">
       {sortedBlocks.map((block) => {
-        // DnD-блоки: рендерим один контейнер при первом встрече.
         if (block.type === 'DragZone' || block.type === 'DragObject') {
-          if (dndRendered) return null; // уже отрендерили контейнер
+          if (dndRendered) return null;
           dndRendered = true;
+
           const dndBlocks = sortedBlocks.filter(
-            (b) => b.type === 'DragZone' || b.type === 'DragObject',
+            (item) => item.type === 'DragZone' || item.type === 'DragObject',
           );
+
           return (
             <DnDContainer
               key="dnd-container"
@@ -117,7 +110,6 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
           );
         }
 
-        // Обычные блоки.
         switch (block.type) {
           case 'TextBlock':
             return <TextBlockView key={block.id} block={block} />;
@@ -128,8 +120,8 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
               <InputFieldView
                 key={block.id}
                 block={block}
-                onChange={(val) => {
-                  inputsRef.current[block.answerKey] = val;
+                onChange={(value) => {
+                  inputsRef.current[block.answerKey] = value;
                 }}
               />
             );

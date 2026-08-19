@@ -1,45 +1,55 @@
 /**
- * app/quiz/page.tsx — страница карточки конкурса (query-based).
+ * src/app/quiz/page.tsx — страница карточки конкурса через query-параметр.
  *
- * Обновления (август 2026):
- *  - Заменяет старый динамический маршрут /quiz/[id] на /quiz?id=X.
- *  - ID карточки берётся из useSearchParams(), загружается через sheetsApi.getCard().
- *  - Не требует generateStaticParams — любая новая карточка доступна сразу после добавления в Sheets.
+ * Маршрут: /quiz?id=<card_id>.
+ * Карточка может быть добавлена в Sheets после деплоя: static export не требует
+ * generateStaticParams и нового билда для каждого ID.
+ *
+ * Лог отправляется одним запросом вместе с ответом.
  */
 
 'use client';
 
-import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCard } from '@/lib/hooks/useCard';
+import { useRepost } from '@/lib/hooks/useRepost';
 import { useNotification } from '@/lib/hooks/useNotification';
 import { useUserStore } from '@/lib/store/userStore';
 import { sheetsApi } from '@/lib/sheets/api.client';
-import { logEvent, getLogBuffer, clearLogBuffer } from '@/lib/sheets/logger';
+import {
+  clearLogBuffer,
+  getLogBuffer,
+  logEvent,
+} from '@/lib/sheets/logger';
 import { useToast } from '@/components/ui/Toast';
 import { CardRenderer } from '@/components/quiz/CardRenderer';
 import { RepostModal } from '@/components/quiz/RepostModal';
 import { NotificationModal } from '@/components/quiz/NotificationModal';
-import { isReleased } from '@/utils/time';
-import { deltaSeconds } from '@/utils/time';
+import { deltaSeconds, isReleased } from '@/utils/time';
 import { safeStringify } from '@/utils/json';
-import { setRaw } from '@/utils/storage';
-import { STORAGE_OPEN_TIME_PREFIX, STORAGE_OFFLINE_QUEUE } from '@/constants';
-import type { AnswerPayload, AnswerRecord, CardRecord } from '@/types';
+import { getRaw, setRaw } from '@/utils/storage';
+import { STORAGE_OFFLINE_QUEUE, STORAGE_OPEN_TIME_PREFIX } from '@/constants';
+import type { AnswerPayload, AnswerRecord } from '@/types';
 
 function QuizContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const cardId = searchParams.get('id') || '';
+
+  const { card, loading, error, openTime } = useCard(cardId);
   const { vkUser } = useUserStore();
   const toast = useToast();
 
-  const [card, setCard] = useState<CardRecord | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [openTime, setOpenTime] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const repostCheckStarted = useRef(false);
+
+  const { hasRepost, check, doRepost, posting } = useRepost(
+    cardId,
+    card?.post_id || '',
+    vkUser?.id || '',
+  );
 
   const {
     showPopup: showNotifPopup,
@@ -48,126 +58,84 @@ function QuizContent() {
     requesting: notifRequesting,
   } = useNotification();
 
-  // Проверка репоста (ленивая, один раз).
-  const [hasRepost, setHasRepost] = useState(false);
-  const [checkingRepost, setCheckingRepost] = useState(false);
+  /** Отправить ответ и накопленный журнал одной операцией. */
+  const handleSubmit = useCallback(async (payload: AnswerPayload) => {
+    if (!vkUser || !card || submitting) return;
 
-  const checkRepost = useCallback(async () => {
-    if (!card || !vkUser || checkingRepost) return;
-    setCheckingRepost(true);
+    setSubmitting(true);
+
     try {
-      const reposted = await sheetsApi.checkRepost(vkUser.id, card.post_id || '');
-      setHasRepost(reposted);
-      if (!reposted) {
-        setShowRepostModal(true);
-        await logEvent('modal_open', { type: 'repost', card_id: cardId });
-      }
-    } catch (e) {
-      await logEvent('api_error', { action: 'checkRepost', error: String(e) });
-    }
-  }, [card, vkUser, checkingRepost, cardId]);
+      const submitMs = Date.now();
+      const startMs = openTime || submitMs;
+      const log = getLogBuffer();
 
-  /** Загрузка карточки. */
-  const loadCard = useCallback(async () => {
-    if (!cardId) {
-      setError('Не указан ID карточки');
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const found = await sheetsApi.getCard(cardId);
-      if (!found) {
-        setError('Карточка не найдена');
-      } else {
-        setCard(found);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Ошибка загрузки карточки';
-      setError(msg);
-      await logEvent('api_error', { action: 'getCard', error: msg });
-    } finally {
-      setLoading(false);
-    }
-  }, [cardId]);
+      const answer: AnswerRecord & { log?: typeof log } = {
+        id: '0',
+        vk_id: vkUser.id,
+        card_id: cardId,
+        open_timestamp: new Date(startMs).toISOString(),
+        submit_timestamp: new Date(submitMs).toISOString(),
+        delta_seconds: deltaSeconds(startMs, submitMs),
+        user_answer: safeStringify(payload),
+        has_reposted: hasRepost,
+        log,
+      };
 
-  /** Фиксация времени открытия (локально, в localStorage). */
-  const fixOpenTime = useCallback(() => {
-    const key = `${STORAGE_OPEN_TIME_PREFIX}${cardId}_open`;
-    let stored = Number(localStorage.getItem(key) || 0);
-    if (!stored) {
-      stored = Date.now();
-      localStorage.setItem(key, String(stored));
-    }
-    setOpenTime(stored);
-  }, [cardId]);
-
-  useEffect(() => {
-    loadCard();
-    fixOpenTime();
-  }, [loadCard, fixOpenTime]);
-
-  useEffect(() => {
-    if (card && !loading && !repostCheckStarted.current) {
-      repostCheckStarted.current = true;
-      checkRepost();
-    }
-  }, [card, loading, checkRepost]);
-
-  /** Отправка ответа. */
-  const handleSubmit = useCallback(
-    async (payload: AnswerPayload) => {
-      if (!vkUser || !card || submitting) return;
-      setSubmitting(true);
-
-      try {
-        const submitMs = Date.now();
-        const startMs = openTime || submitMs;
-        const delta = deltaSeconds(startMs, submitMs);
-
-        // Получаем накопленный лог.
-        const log = getLogBuffer();
-
-        const answer: AnswerRecord & { log?: typeof log } = {
-          id: '0',
-          vk_id: vkUser.id,
-          card_id: cardId,
-          open_timestamp: new Date(startMs).toISOString(),
-          submit_timestamp: new Date(submitMs).toISOString(),
-          delta_seconds: delta,
-          user_answer: safeStringify(payload),
-          has_reposted: hasRepost,
-          log,
-        };
-
-        if (!navigator.onLine) {
-          const queue = JSON.parse(localStorage.getItem(STORAGE_OFFLINE_QUEUE) || '[]');
-          queue.push(answer);
-          localStorage.setItem(STORAGE_OFFLINE_QUEUE, JSON.stringify(queue));
-          setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
-          await logEvent('offline_save', { card_id: cardId });
-          toast.info('Нет соединения. Ответ сохранён и будет отправлен позже.');
-          router.push(`/thanks?card=${cardId}&offline=1`);
-          clearLogBuffer();
-          return;
-        }
-
-        await sheetsApi.saveAnswer(answer);
+      if (!navigator.onLine) {
+        const queue = getRaw<AnswerRecord[]>(STORAGE_OFFLINE_QUEUE) || [];
+        queue.push(answer);
+        setRaw(STORAGE_OFFLINE_QUEUE, queue);
         setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
-        toast.success('Ответ отправлен!');
-        router.push(`/thanks?card=${cardId}`);
+
+        await logEvent('offline_save', { card_id: cardId });
         clearLogBuffer();
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Ошибка отправки ответа';
-        await logEvent('api_error', { action: 'saveAnswer', error: msg });
-        toast.error(msg);
-      } finally {
-        setSubmitting(false);
+        toast.info('Нет соединения. Ответ сохранён и будет отправлен позже.');
+        router.push(`/thanks?card=${cardId}&offline=1`);
+        return;
       }
-    },
-    [vkUser, card, cardId, openTime, hasRepost, submitting, router, toast],
-  );
+
+      await sheetsApi.saveAnswer(answer);
+      clearLogBuffer();
+      setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
+      toast.success('Ответ отправлен!');
+      router.push(`/thanks?card=${cardId}`);
+    } catch (submitError) {
+      const message = submitError instanceof Error
+        ? submitError.message
+        : 'Ошибка отправки ответа';
+      await logEvent('api_error', { action: 'saveAnswer', error: message });
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [card, cardId, hasRepost, openTime, router, submitting, toast, vkUser]);
+
+  /** Проверить репост после успешной загрузки карточки. */
+  const handleCardReady = useCallback(async () => {
+    if (repostCheckStarted.current || !card || !vkUser || hasRepost) return;
+
+    repostCheckStarted.current = true;
+    const reposted = await check();
+
+    if (!reposted) {
+      setShowRepostModal(true);
+      await logEvent('modal_open', { type: 'repost', card_id: cardId });
+    }
+  }, [card, cardId, check, hasRepost, vkUser]);
+
+  useEffect(() => {
+    if (card && !loading) {
+      void handleCardReady();
+    }
+  }, [card, handleCardReady, loading]);
+
+  if (!cardId) {
+    return (
+      <div className="card-surface text-center text-red-500">
+        Не указан ID карточки.
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -211,13 +179,10 @@ function QuizContent() {
         open={showRepostModal}
         onClose={() => setShowRepostModal(false)}
         onRepost={async () => {
-          const ok = await sheetsApi.checkRepost(vkUser!.id, card.post_id || '');
-          if (ok) {
-            setHasRepost(true);
-            setShowRepostModal(false);
-          }
+          const ok = await doRepost();
+          if (ok) setShowRepostModal(false);
         }}
-        posting={checkingRepost}
+        posting={posting}
       />
       <NotificationModal
         open={showNotifPopup}

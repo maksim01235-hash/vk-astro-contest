@@ -1,9 +1,9 @@
 /**
- * components/quiz/NotificationModal.tsx — попап "Хочу получать уведомления".
- * Показывается при первом заходе и после отправки ответа.
+ * src/components/quiz/NotificationModal.tsx — попап уведомлений.
  *
- * ПРАВКА: регистрируем открытие/закрытие в useUiStore, чтобы Header мог
- * принудительно закрыть эту модалку при клике на "Конкурс" (см. Header.tsx).
+ * Важно: компонент только синхронизирует флаг в uiStore. Он не вызывает
+ * onDismiss автоматически, иначе модалка закрывалась на первом рендере,
+ * ещё до отображения пользователю.
  */
 
 'use client';
@@ -23,19 +23,12 @@ interface Props {
 const MODAL_ID = 'notification';
 
 export function NotificationModal({ open, onAllow, onDismiss, requesting }: Props) {
-  const setModalOpen = useUiStore((s) => s.setModalOpen);
-  const openModals = useUiStore((s) => s.openModals);
+  const setModalOpen = useUiStore((state) => state.setModalOpen);
 
   useEffect(() => {
     setModalOpen(MODAL_ID, open);
     return () => setModalOpen(MODAL_ID, false);
   }, [open, setModalOpen]);
-
-  useEffect(() => {
-    if (open && !openModals.has(MODAL_ID)) {
-      onDismiss();
-    }
-  }, [openModals, open, onDismiss]);
 
   return (
     <Modal open={open} onClose={onDismiss} title="Уведомления">

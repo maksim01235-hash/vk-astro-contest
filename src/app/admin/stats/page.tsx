@@ -1,8 +1,9 @@
 /**
  * app/admin/stats/page.tsx — страница статистики.
  *
- * Обновления (v2):
- *  - Добавлено число подписавшихся (subscribed_count).
+ * Обновления (v3, август 2026):
+ *  - Добавлено число подписавшихся на группу VK (subscribed_group_count),
+ *    отдельно от числа подписавшихся на уведомления (subscribed_count).
  */
 
 'use client';
@@ -36,6 +37,7 @@ export default function StatsPage() {
   const [stats, setStats] = useState<CardStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [subscribedCount, setSubscribedCount] = useState(0);
+  const [subscribedGroupCount, setSubscribedGroupCount] = useState(0);
   const toast = useToast();
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function StatsPage() {
         setStats(data);
         if (data.length > 0) {
           setSubscribedCount(data[0].subscribed_count);
+          setSubscribedGroupCount(data[0].subscribed_group_count);
         }
       } catch (e) {
         toast.error('Не удалось загрузить статистику');
@@ -117,15 +120,25 @@ export default function StatsPage() {
         <Link href="/admin" className="btn-secondary text-sm">← К конструктору</Link>
       </div>
 
-      {/* Число подписавшихся */}
-      <div className="card-surface mb-4">
-        <h3 className="text-sm font-semibold text-slate-700 mb-2">
-          Подписавшиеся на уведомления
-        </h3>
-        <p className="text-3xl font-bold text-accent">{subscribedCount}</p>
+      {/* Число подписавшихся: уведомления и группа VK — раздельно. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className="card-surface">
+          <h3 className="text-sm font-semibold text-slate-700 mb-2">
+            Подписавшиеся на уведомления
+          </h3>
+          <p className="text-3xl font-bold text-accent">{subscribedCount}</p>
+        </div>
+        <div className="card-surface">
+          <h3 className="text-sm font-semibold text-slate-700 mb-2">
+            Подписавшиеся на группу VK
+          </h3>
+          <p className="text-3xl font-bold text-accent">{subscribedGroupCount}</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Среди участников конкурса (через groups.isMember)
+          </p>
+        </div>
       </div>
 
-      {/* График: процент ответивших */}
       <div className="card-surface mb-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-4">Процент ответивших (от числа пользователей, %)</h3>
         <ResponsiveContainer width="100%" height={250}>
@@ -139,7 +152,6 @@ export default function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* График: количество ответов */}
       <div className="card-surface mb-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-4">Количество ответов по карточкам</h3>
         <ResponsiveContainer width="100%" height={250}>
@@ -153,7 +165,6 @@ export default function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* График: средняя delta */}
       <div className="card-surface mb-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-4">Среднее время решения (секунды)</h3>
         <ResponsiveContainer width="100%" height={250}>
@@ -167,20 +178,11 @@ export default function StatsPage() {
         </ResponsiveContainer>
       </div>
 
-      {/* График: репосты */}
       <div className="card-surface">
         <h3 className="text-sm font-semibold text-slate-700 mb-4">Репосты по карточкам</h3>
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
-            <Pie
-              data={repostData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              outerRadius={100}
-              label
-            >
+            <Pie data={repostData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
               {repostData.map((_, i) => (
                 <Cell key={i} fill={COLORS[i % COLORS.length]} />
               ))}

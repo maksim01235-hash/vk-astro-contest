@@ -1,8 +1,9 @@
 /**
  * components/quiz/DnDContainer.tsx — контейнер drag-and-drop через @dnd-kit.
  *
- * Исправления (v2):
- *  - textPosition: left/right/top/bottom теперь работают корректно.
+ * ВАЖНО: путь замены — vk-contest-mini-app/src/components/quiz/DnDContainer.tsx
+ * После замены проверьте: в файле должна быть строка "touchAction: 'none'"
+ * и "flex flex-wrap gap-3" для зон (не "grid grid-cols-1 sm:grid-cols-3").
  */
 
 'use client';
@@ -39,7 +40,7 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 10 } }),
     useSensor(KeyboardSensor),
   );
 
@@ -95,7 +96,7 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="flex flex-wrap gap-3">
           {zones.map((zone) => {
             const items = state[zone.zoneId] || [];
             const isAllowed = !activeObject || activeObject.allowedZones.includes(zone.zoneId);
@@ -112,6 +113,7 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
             );
           })}
         </div>
+
         <div className="card-surface">
           <h4 className="text-sm font-medium text-slate-500 mb-3">Доступные объекты</h4>
           <div className="flex flex-wrap gap-2">
@@ -120,7 +122,9 @@ export function DnDContainer({ blocks, onStateChange }: DnDContainerProps) {
               if (!obj) return null;
               return <DraggableObject key={obj.id} object={obj} />;
             })}
-            {(state.unassigned || []).length === 0 && <span className="text-sm text-slate-400">Все объекты распределены</span>}
+            {(state.unassigned || []).length === 0 && (
+              <span className="text-sm text-slate-400">Все объекты распределены</span>
+            )}
           </div>
         </div>
       </div>
@@ -150,6 +154,7 @@ function DroppableZone({
       ref={setNodeRef}
       className={clsx(
         'rounded-xl border-2 border-dashed p-3 min-h-[120px] transition-all duration-200',
+        'flex-1 basis-[200px] min-w-[160px] max-w-full',
         isOver && isHighlighted && 'border-accent bg-accent-light scale-[1.02]',
         isHighlighted && !isOver && 'border-accent/50 bg-accent-light/50',
         isRejected && 'border-red-300 bg-red-50',
@@ -176,7 +181,10 @@ function DraggableObject({
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: object.objectId });
 
-  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+  const style: React.CSSProperties = {
+    ...(transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : {}),
+    touchAction: 'none',
+  };
 
   const imgSize = object.imageSize || object.maxImageSize;
   const imgStyle = imgSize
@@ -189,11 +197,6 @@ function DraggableObject({
   const hasLabel = !!object.label && object.label.trim() !== '';
   const textPos = object.textPosition || 'left';
 
-  // Исправленная логика:
-  // left: текст слева, картинка справа → flex-row-reverse
-  // right: текст справа, картинка слева → flex-row
-  // top: текст над картинкой → flex-col-reverse
-  // bottom: текст под картинкой → flex-col
   const flexClass =
     !hasImage || !hasLabel
       ? 'flex-row'
@@ -228,6 +231,7 @@ function DraggableObject({
           alt={object.label || 'DnD object'}
           className="rounded object-cover"
           style={imgStyle}
+          draggable={false}
         />
       )}
       {hasLabel && <span>{object.label}</span>}
