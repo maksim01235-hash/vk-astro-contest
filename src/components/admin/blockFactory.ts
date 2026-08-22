@@ -1,34 +1,22 @@
-/**
- * components/admin/blockFactory.ts — создание новых блоков по типу.
- * Генерирует блок с дефолтными значениями и уникальным ID.
- */
-
 import type { Block, BlockType } from '@/types';
 import { genId } from '@/utils/json';
 
-/**
- * Создаёт новый блок указанного типа с дефолтными значениями.
- * @param type — тип блока
- * @param order — порядковый номер на холсте
- */
 export function createBlock(type: BlockType, order: number): Block {
   const id = genId();
+
   switch (type) {
     case 'TextBlock':
-      return {
-        id,
-        type,
-        order,
-        content: '## Новый текст\nВведите содержание (поддержка Markdown).',
-      };
+      return { id, type, order, content: '## Новый текст\nВведите содержание (поддержка Markdown).' };
     case 'ImageBlock':
       return {
         id,
         type,
         order,
-        src: 'https://via.placeholder.com/600x400',
-        alt: '',
+        images: [{ id: genId(), src: 'https://via.placeholder.com/600x400', alt: '' }],
         width: 'full',
+        layoutMode: 'flow',
+        gridColumns: 2,
+        viewer: true,
       };
     case 'InputField':
       return {
@@ -42,14 +30,7 @@ export function createBlock(type: BlockType, order: number): Block {
         answerKey: 'answer',
       };
     case 'Button':
-      return {
-        id,
-        type,
-        order,
-        label: 'Отправить ответ',
-        action: 'submit',
-        variant: 'primary',
-      };
+      return { id, type, order, label: 'Отправить ответ', action: 'submit', variant: 'primary' };
     case 'DragZone':
       return {
         id,
@@ -58,6 +39,8 @@ export function createBlock(type: BlockType, order: number): Block {
         zoneId: `zone_${Date.now()}`,
         label: 'Новая зона',
         maxItems: 0,
+        layoutMode: 'flow',
+        gridColumns: 2,
       };
     case 'DragObject':
       return {
@@ -67,6 +50,8 @@ export function createBlock(type: BlockType, order: number): Block {
         objectId: `obj_${Date.now()}`,
         label: 'Новый объект',
         allowedZones: [],
+        layoutMode: 'flow',
+        gridColumns: 2,
       };
     default:
       throw new Error(`Unknown block type: ${type}`);

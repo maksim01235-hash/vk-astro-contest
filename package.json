@@ -24,6 +24,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.51.3",
+    "react-zoom-pan-pinch": "^3.7.0",
     "recharts": "^2.12.4",
     "yet-another-react-lightbox": "^3.32.2",
     "zod": "^3.23.4",

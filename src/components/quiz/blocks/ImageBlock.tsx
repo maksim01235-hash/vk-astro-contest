@@ -1,72 +1,77 @@
-/**
- * components/quiz/blocks/ImageBlock.tsx — картинка в карточке.
- *
- * ВАЖНО: путь замены — vk-contest-mini-app/src/components/quiz/blocks/ImageBlock.tsx
- * (файл лежит ВНУТРИ подпапки blocks, не путайте с корнем quiz/).
- * После замены рядом ДОЛЖЕН существовать файл:
- * vk-contest-mini-app/src/components/quiz/ImageViewerModal.tsx (создаётся отдельно).
- */
-
 'use client';
 
-import { useState } from 'react';
-import { ImageBlock as ImageBlockType } from '@/types';
+import { useMemo, useState } from 'react';
+import type { ImageBlock as ImageBlockType } from '@/types';
 import { ImageViewerModal } from '../ImageViewerModal';
 
 interface Props {
   block: ImageBlockType;
 }
 
+function getImages(block: ImageBlockType) {
+  if (block.images?.length) return block.images;
+  if (block.src) {
+    return [{ id: `${block.id}-legacy`, src: block.src, alt: block.alt || '' }];
+  }
+  return [];
+}
+
 export function ImageBlockView({ block }: Props) {
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const images = useMemo(() => getImages(block), [block]);
 
-  const widthClass = block.width === 'full' ? 'w-full' : '';
-  const style = typeof block.width === 'number' ? { width: block.width } : undefined;
+  const layoutStyle: React.CSSProperties =
+    block.layoutMode === 'grid'
+      ? { gridTemplateColumns: `repeat(${Math.max(1, Math.min(block.gridColumns || 2, 6))}, minmax(0, 1fr))` }
+      : {};
 
-  const containerStyle: React.CSSProperties = {};
-  if (block.maxImageWidth) containerStyle.maxWidth = `${block.maxImageWidth}px`;
-  if (block.maxImageHeight) containerStyle.maxHeight = `${block.maxImageHeight}px`;
-  if (block.maxImageWidth || block.maxImageHeight) {
-    containerStyle.display = 'inline-block';
-  }
+  const openViewer = (index: number) => {
+    setViewerIndex(index);
+    setViewerOpen(true);
+  };
 
   return (
     <>
       <div
-        className="relative rounded-xl overflow-hidden border border-slate-200"
-        style={containerStyle}
+        className={block.layoutMode === 'grid' ? 'grid gap-3' : 'flex flex-wrap gap-3'}
+        style={layoutStyle}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={block.src}
-          alt={block.alt || ''}
-          className={`${widthClass} h-auto object-cover block`}
-          style={style}
-        />
+        {images.map((image, index) => {
+          const imageStyle: React.CSSProperties = {};
+          if (typeof block.width === 'number') imageStyle.width = block.width;
+          if (block.maxImageWidth) imageStyle.maxWidth = `${block.maxImageWidth}px`;
+          if (block.maxImageHeight) imageStyle.maxHeight = `${block.maxImageHeight}px`;
 
-        {block.viewer && (
-          <button
-            type="button"
-            onClick={() => setViewerOpen(true)}
-            aria-label="Открыть в полноэкранном режиме"
-            className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80
-                       flex items-center justify-center text-white transition-colors z-10"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="2" />
-              <path d="M10.5 8V13M8 10.5H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M15 15L20 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
+          return (
+            <div key={image.id} className="relative overflow-hidden rounded-xl border border-slate-200">
+              <img
+                src={image.src}
+                alt={image.alt || ''}
+                className={`${block.width === 'full' ? 'w-full' : ''} h-auto max-w-full object-contain block`}
+                style={imageStyle}
+              />
+              {block.viewer && (
+                <button
+                  type="button"
+                  onClick={() => openViewer(index)}
+                  aria-label="Открыть изображение"
+                  className="absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                >
+                  +
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {block.viewer && (
+      {block.viewer && images.length > 0 && (
         <ImageViewerModal
           open={viewerOpen}
           onClose={() => setViewerOpen(false)}
-          src={block.src}
-          alt={block.alt || ''}
+          images={images}
+          initialIndex={viewerIndex}
         />
       )}
     </>
