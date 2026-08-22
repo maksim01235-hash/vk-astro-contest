@@ -14,8 +14,8 @@
 1. В настройках приложения найдите раздел **App settings**.
 2. Поле **Redirect URL** — пока не нужно (для OAuth).
 3. Поле **App URL** (или VK Mini App URL):
-   - Для локальной разработки: `http://localhost:3000/vk-contest-mini-app`
-   - Для продакшна: `https://ВАШ_НИК.github.io/vk-contest-mini-app/`
+   - Для локальной разработки: `http://localhost:3000/vk-astro-contest`
+   - Для продакшна: `https://ВАШ_НИК.github.io/vk-astro-contest/`
 4. Сохраните.
 
 ## Шаг 3. Скопируйте ID приложения

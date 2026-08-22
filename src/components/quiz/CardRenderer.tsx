@@ -1,15 +1,11 @@
 /**
  * src/components/quiz/CardRenderer.tsx — рендерит карточку по JSON-схеме.
  *
- * Обновления (август 2026):
- *  - Добавлена поддержка ImageMarkerBlock.
- *
  * Формат ответа:
  *  - Карточка содержит хотя бы один DnD-блок → всегда полный JSON { inputs, dnd },
  *    включая пустое состояние и unassigned-объекты.
  *  - DnD-блоков нет, одно текстовое поле → его значение без JSON-обёртки.
  *  - DnD-блоков нет, несколько текстовых полей → значения через ";".
- *  - Карточка содержит ImageMarkerBlock → добавляется поле marker.
  */
 
 'use client';
@@ -21,7 +17,6 @@ import { ImageBlockView } from './blocks/ImageBlock';
 import { InputFieldView } from './blocks/InputField';
 import { ButtonView } from './blocks/Button';
 import { DnDContainer } from './DnDContainer';
-import { ImageMarkerBlockView } from './blocks/ImageMarkerBlock';
 import { safeParse } from '@/utils/json';
 
 interface CardRendererProps {
@@ -34,20 +29,9 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
   const schema = safeParse<CardSchema>(jsonSchema, { blocks: [] });
   const inputsRef = useRef<Record<string, string>>({});
   const dndRef = useRef<DnDState>({});
-  
-  // Состояние для ImageMarkerBlock.
-  const [markerState, setMarkerState] = useState<{
-    userX: number;
-    userY: number;
-    confirmed: boolean;
-  } | null>(null);
 
   const handleDndStateChange = useCallback((state: DnDState) => {
     dndRef.current = state;
-  }, []);
-
-  const handleMarkerChange = useCallback((x: number, y: number, confirmed: boolean) => {
-    setMarkerState({ userX: x, userY: y, confirmed });
   }, []);
 
   if (!schema.blocks || schema.blocks.length === 0) {
@@ -69,35 +53,13 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
     (block) => block.type === 'DragZone' || block.type === 'DragObject',
   );
 
-  /**
-   * Проверяем наличие ImageMarkerBlock.
-   */
-  const cardHasMarker = sortedBlocks.some(
-    (block) => block.type === 'ImageMarkerBlock',
-  );
-
   const handleSubmit = () => {
     const inputs = { ...inputsRef.current };
     const dnd = { ...dndRef.current };
 
-    // Если есть ImageMarkerBlock, проверяем, что метка подтверждена.
-    if (cardHasMarker && (!markerState || !markerState.confirmed)) {
-      alert('Зафиксируйте позицию метки перед отправкой ответа!');
-      return;
-    }
-
     if (cardHasDnd) {
       // В DnD-карточке всегда оставляем полный JSON.
-      onSubmit({
-        inputs,
-        dnd,
-        marker: markerState ? {
-          userX: markerState.userX,
-          userY: markerState.userY,
-          actualErrorPercent: 0, // Вычисляется на сервере.
-          isCorrect: false, // Вычисляется на сервере.
-        } : undefined,
-      });
+      onSubmit({ inputs, dnd });
       return;
     }
 
@@ -105,46 +67,13 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
 
     if (inputKeys.length === 1) {
       // Один текстовый ответ: сервер сохранит чистую строку.
-      onSubmit({
-        inputs: { answer: inputs[inputKeys[0]] },
-        dnd: {},
-        marker: markerState ? {
-          userX: markerState.userX,
-          userY: markerState.userY,
-          actualErrorPercent: 0,
-          isCorrect: false,
-        } : undefined,
-      });
+      onSubmit({ inputs: { answer: inputs[inputKeys[0]] }, dnd: {} });
       return;
     }
 
     if (inputKeys.length > 1) {
       // Несколько текстовых полей: значения в стабильном порядке через ";".
-      onSubmit({
-        inputs: { answer: inputKeys.map((key) => inputs[key]).join(';') },
-        dnd: {},
-        marker: markerState ? {
-          userX: markerState.userX,
-          userY: markerState.userY,
-          actualErrorPercent: 0,
-          isCorrect: false,
-        } : undefined,
-      });
-      return;
-    }
-
-    // Карточка без текстовых полей и без DnD, но с маркером.
-    if (cardHasMarker && markerState) {
-      onSubmit({
-        inputs: {},
-        dnd: {},
-        marker: {
-          userX: markerState.userX,
-          userY: markerState.userY,
-          actualErrorPercent: 0,
-          isCorrect: false,
-        },
-      });
+      onSubmit({ inputs: { answer: inputKeys.map((key) => inputs[key]).join(';') }, dnd: {} });
       return;
     }
 
@@ -170,17 +99,6 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
               key="dnd-container"
               blocks={dndBlocks}
               onStateChange={handleDndStateChange}
-            />
-          );
-        }
-
-        if (block.type === 'ImageMarkerBlock') {
-          return (
-            <ImageMarkerBlockView
-              key={block.id}
-              block={block}
-              onMarkerChange={handleMarkerChange}
-              onMarkerConfirm={() => {}}
             />
           );
         }

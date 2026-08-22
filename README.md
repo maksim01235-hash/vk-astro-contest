@@ -7,7 +7,8 @@
 - **Фронтенд**: Next.js 14 (App Router) + TypeScript + Tailwind CSS
 - **Бэкенд**: Google Sheets через Google Apps Script (REST API-прокси)
 - **VK**: авторизация, репост, уведомления через VK Bridge
-- **DnD**: @dnd-kit для перетаскивания объектов в зоны
+- **DnD**: @dnd-kit/core для перетаскивания объектов в зоны
+- **Просмотр фото**: PhotoSwipe
 - **Хостинг**: GitHub Pages (статический экспорт)
 
 ## Возможности
@@ -18,7 +19,7 @@
 4. Измерение времени решения (delta = submit - open)
 5. Логирование всех действий в Google Sheets (таблица Logs)
 6. Проверка репоста + модалка с кнопкой репоста
-7. Попап уведомлений (VKWebAppAllowNotifications)
+7. Попап уведомлений (VKWebappAllowNotifications)
 8. Оффлайн-очередь ответов
 9. Админ-конструктор карточек (drag-and-drop блоков)
 10. Страница статистики с графиками (Recharts)
@@ -65,13 +66,15 @@ npm install
 
 ### Шаг 5. Настройте переменные окружения
 
-1. Скопируйте `.env.example` в `.env.local`:
+1. Создайте файл `.env.local` в корне проекта.
+2. Вставьте переменные:
    ```
-   cp .env.example .env.local
+   NEXT_PUBLIC_SHEETS_API_URL=<URL из шага 4>
+   NEXT_PUBLIC_VK_APP_ID=<ID приложения VK>
+   NEXT_PUBLIC_ADMIN_PASSWORD_HASH=<SHA-256 хеш пароля>
+   NEXT_PUBLIC_BASE_PATH=/vk-astro-contest
+   NEXT_PUBLIC_MOCK_MODE=false
    ```
-2. Откройте `.env.local` в любом текстовом редакторе.
-3. Вставьте URL из шага 4 в `NEXT_PUBLIC_SHEETS_API_URL`.
-4. Задайте хеш пароля админки (см. ниже).
 
 ### Шаг 6. Запустите локально
 
@@ -79,7 +82,7 @@ npm install
 npm run dev
 ```
 
-Откройте [http://localhost:3000/vk-contest-mini-app](http://localhost:3000/vk-contest-mini-app).
+Откройте [http://localhost:3000/vk-astro-contest](http://localhost:3000/vk-astro-contest).
 
 Для разработки без VK включите mock-режим:
 ```
@@ -105,8 +108,8 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
 Пароль админки хранится как SHA-256-хеш.
 
 1. Сгенерируйте хеш (в терминале):
-   ```
-   node -e "require('crypto').createHash('sha256').update('вашпароль').digest('hex').split('').forEach(c=>process.stdout.write(c))"
+   ```bash
+   node -e "console.log(require('crypto').createHash('sha256').update('вашпароль').digest('hex'))"
    ```
    Замените `вашпароль` на свой пароль.
 2. Скопируйте полученный hex.
@@ -126,18 +129,18 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
    git add .
    git commit -m "Initial commit"
    git branch -M main
-   git remote add origin https://github.com/ВАШ_НИК/vk-contest-mini-app.git
+   git remote add origin https://github.com/ВАШ_НИК/vk-astro-contest.git
    git push -u origin main
    ```
 3. В репозитории: Settings → Pages → Source = "GitHub Actions".
 4. В Settings → Secrets and variables → Actions добавьте секреты:
    - `NEXT_PUBLIC_SHEETS_API_URL` — URL Apps Script
    - `NEXT_PUBLIC_ADMIN_PASSWORD_HASH` — хеш пароля
-   - `NEXT_PUBLIC_BASE_PATH` — путь репозитория (например, `/vk-contest-mini-app`)
+   - `NEXT_PUBLIC_BASE_PATH` — путь репозитория (например, `/vk-astro-contest`)
    - `NEXT_PUBLIC_MOCK_MODE` — `false`
    - `NEXT_PUBLIC_VK_APP_ID` — ID приложения VK
 5. При пуше в main — автоматически соберётся и опубликуется.
-6. Сайт будет на `https://ВАШ_НИК.github.io/vk-contest-mini-app/`.
+6. Сайт будет на `https://ВАШ_НИК.github.io/vk-astro-contest/`.
 
 ### Вариант B: вручную через gh-pages
 
@@ -158,7 +161,7 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
 ## Ограничения статического экспорта
 
 1. **Динамические маршруты**: `/quiz/[id]` требует пребилда ID карточек.
-   **Решение (август 2026)**: используется маршрут с query-параметром `/quiz?id=X`.
+   **Решение**: используется маршрут с query-параметром `/quiz?id=X`.
    Любая новая карточка, добавленная в Google Sheets, сразу доступна без пересборки.
 
 2. **VK Bridge**: работает только внутри VK (приложение или vk.com).
@@ -173,40 +176,87 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
 ## Структура проекта
 
 ```
-vk-contest-mini-app/
-├── src/
-│   ├── app/                    # страницы (App Router)
-│   │   ├── layout.tsx          # корневой layout
-│   │   ├── page.tsx            # главная (список карточек)
-│   │   ├── quiz/
-│   │   │   └── page.tsx        # карточка конкурса (/quiz?id=X)
-│   │   ├── admin/             # админ-конструктор
-│   │   │   └── stats/        # статистика
-│   │   ├── thanks/            # благодарность
-│   │   └── feedback/         # обратная связь
-│   ├── components/
-│   │   ├── ui/                # Button, Input, Modal, Toast, ErrorBoundary
-│   │   ├── quiz/              # CardRenderer, DnDContainer, блоки
-│   │   ├── admin/             # BlockToolbar, Canvas, PropertiesPanel
-│   │   └── common/            # Header, Footer, Providers
-│   ├── lib/
-│   │   ├── vk/                # bridge.ts (VK Bridge обёртка)
-│   │   ├── sheets/            # api.client.ts, logger.ts, mockData.ts
-│   │   ├── store/             # Zustand: userStore, cardsStore
-│   │   └── hooks/             # useAuth, useCard, useRepost, useNotification
-│   ├── types/                 # TypeScript-интерфейсы
-│   ├── constants/             # все константы
-│   ├── utils/                 # storage, time, json, crypto
-│   └── styles/                # globals.css
+vk-astro-contest/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml              # CI/CD для GitHub Pages
 ├── apps-script/
-│   └── Code.gs                # Google Apps Script (бэкенд)
-├── docs/                      # инструкции
-├── .github/workflows/         # CI/CD для GitHub Pages
+│   └── Code.gs                     # Google Apps Script (бэкенд)
+├── docs/
+│   ├── google-sheets-setup.md      # Инструкция по настройке Sheets
+│   ├── vk-setup.md                 # Инструкция по настройке VK
+│   └── json-schema-examples.md     # Примеры JSON-схем карточек
+├── src/
+│   ├── app/                        # страницы (App Router)
+│   │   ├── layout.tsx              # корневой layout
+│   │   ├── page.tsx                # главная (список карточек)
+│   │   ├── quiz/
+│   │   │   └── page.tsx            # карточка конкурса (/quiz?id=X)
+│   │   ├── admin/
+│   │   │   └── page.tsx            # админ-конструктор
+│   │   ├── thanks/
+│   │   │   └── page.tsx            # благодарность после отправки
+│   │   └── feedback/
+│   │       └── page.tsx            # обратная связь
+│   ├── components/
+│   │   ├── ui/                     # базовые UI-компоненты
+│   │   │   ├── Button.tsx
+│   │   │   ├── Input.tsx
+│   │   │   ├── Modal.tsx
+│   │   │   ├── Toast.tsx
+│   │   │   └── ErrorBoundary.tsx
+│   │   ├── quiz/                   # компоненты карточек
+│   │   │   ├── CardRenderer.tsx
+│   │   │   ├── DnDContainer.tsx
+│   │   │   ├── RepostModal.tsx
+│   │   │   ├── NotificationModal.tsx
+│   │   │   ├── PhotoSwipeViewer.tsx
+│   │   │   └── blocks/             # рендеры блоков
+│   │   │       ├── TextBlock.tsx
+│   │   │       ├── ImageBlock.tsx
+│   │   │       ├── InputField.tsx
+│   │   │       └── Button.tsx
+│   │   ├── admin/                  # админ-конструктор
+│   │   │   ├── Canvas.tsx
+│   │   │   ├── BlockToolbar.tsx
+│   │   │   ├── PropertiesPanel.tsx
+│   │   │   ├── blockFactory.ts
+│   │   │   └── AdminLogButton.tsx
+│   │   └── common/                 # общие компоненты
+│   │       ├── Header.tsx
+│   │       ├── Footer.tsx
+│   │       └── Providers.tsx
+│   ├── lib/
+│   │   ├── hooks/                  # React-хуки
+│   │   │   ├── useAuth.ts
+│   │   │   ├── useCard.ts
+│   │   │   ├── useLocalStorage.ts
+│   │   │   ├── useRepost.ts
+│   │   │   └── useNotification.ts
+│   │   ├── store/                  # Zustand stores
+│   │   │   ├── userStore.ts
+│   │   │   └── cardsStore.ts
+│   │   ├── sheets/                 # Google Sheets API
+│   │   │   ├── api.client.ts
+│   │   │   └── logger.ts
+│   │   └── vk/                     # VK Bridge
+│   │       └── bridge.ts
+│   ├── types/
+│   │   └── index.ts                # TypeScript-интерфейсы
+│   ├── constants/
+│   │   └── index.ts                # константы приложения
+│   ├── utils/
+│   │   ├── storage.ts              # localStorage утилиты
+│   │   ├── time.ts                 # работа со временем
+│   │   ├── json.ts                 # JSON утилиты
+│   │   └── crypto.ts               # крипто-утилиты
+│   └── styles/
+│       └── globals.css             # глобальные стили
 ├── next.config.js
 ├── tailwind.config.js
 ├── tsconfig.json
 ├── package.json
-└── .env.example
+└── .env.local (не в git)
 ```
 
 ## Команды
@@ -215,6 +265,7 @@ vk-contest-mini-app/
 |---------|----------|
 | `npm run dev` | Локальная разработка |
 | `npm run build` | Сборка (static export в `out/`) |
+| `npm run start` | Запуск продакшн-сборки локально |
 | `npm run lint` | Проверка ESLint |
 | `npm run typecheck` | Проверка типов TypeScript |
 | `npm run deploy` | Сборка + деплой на gh-pages |
@@ -230,11 +281,12 @@ vk-contest-mini-app/
 - Next.js 14 (App Router, static export)
 - TypeScript
 - Tailwind CSS
-- @dnd-kit (drag-and-drop)
+- @dnd-kit/core (drag-and-drop)
 - React Hook Form + Zod (валидация)
 - axios (HTTP с retry)
 - Zustand (состояние)
 - Recharts (графики)
+- PhotoSwipe (просмотр изображений)
 - @vkontakte/vk-bridge (VK)
 - Google Apps Script (бэкенд-прокси)
 
@@ -248,3 +300,18 @@ vk-contest-mini-app/
 - **Динамические карточки**: `/quiz?id=X` вместо `/quiz/[id]` — новые карточки без пересборки.
 - **DnD-объекты**: опциональный текст, положение текста (left/right/top/bottom), размер картинки (maxImageSize/imageSize).
 - **Схлопывание user_answer**: один input → значение, несколько → склейка через `;`, dnd → полный формат.
+
+## Поток данных
+
+1. **Авторизация**: `useAuth.ts` → VK Bridge (`getUserInfo`) → `checkUser` API → `userStore`
+2. **Загрузка карточек**: `page.tsx` → `getCards` API → `cardsStore` → кеш в localStorage (5 мин)
+3. **Открытие карточки**: `/quiz?id=X` → `useCard.ts` → `getCard` API → `CardRenderer.tsx`
+4. **Отправка ответа**: `CardRenderer` → `handleSubmit` → `saveAnswer` API + логи → `/thanks`
+5. **DnD**: `DnDContainer.tsx` → `@dnd-kit` → состояние в `dndRef` → отправка в ответе
+6. **Админка**: `admin/page.tsx` → конструктор блоков → `saveCard` API → Google Sheets
+
+## Формат ответа
+
+- **Карточка с DnD**: всегда полный JSON `{ inputs, dnd }`, включая пустое состояние
+- **DnD-блоков нет, одно поле**: чистая строка (значение поля)
+- **DnD-блоков нет, несколько полей**: значения через `;` в стабильном порядке ключей

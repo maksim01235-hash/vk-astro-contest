@@ -1,52 +1,48 @@
 /**
- * src/lib/sheets/logger.ts — клиентский логгер событий.
+ * lib/sheets/logger.ts — логирование событий в буфере.
  *
- * Логи копятся только в памяти текущей страницы. Самостоятельных HTTP-запросов
- * этот модуль не делает: накопленный лог передаётся вместе с saveAnswer или
- * saveFeedback, затем очищается только после успешной отправки.
+ * Логи копятся в памяти и отправляются только вместе с ответом или фидбэком.
  */
 
 import type { EventType, LogRecord } from '@/types';
-import { nowISO } from '@/utils/time';
-import { safeStringify } from '@/utils/json';
-import { useUserStore } from '@/lib/store/userStore';
 
-let buffer: LogRecord[] = [];
+interface LogEntry {
+  timestamp: string;
+  vk_id: string;
+  event_type: EventType;
+  event_data: string;
+  page_url: string;
+  user_agent: string;
+}
 
-function buildRecord(
-  eventType: EventType,
-  eventData: Record<string, unknown>,
-): LogRecord {
-  const vkUser = useUserStore.getState().vkUser;
+let logBuffer: LogEntry[] = [];
 
-  return {
-    timestamp: nowISO(),
+/**
+ * Добавить событие в буфер логов.
+ */
+export async function logEvent(eventType: EventType, eventData: Record<string, unknown>) {
+  const vkUser = await import('@/lib/store/userStore').then((m) => m.useUserStore.getState().vkUser);
+  const entry: LogEntry = {
+    timestamp: new Date().toISOString(),
     vk_id: vkUser?.id || 'anonymous',
     event_type: eventType,
-    event_data: safeStringify(eventData),
-    page_url: typeof window !== 'undefined' ? window.location.href : '',
-    user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    event_data: JSON.stringify(eventData),
+    page_url: window.location.href,
+    user_agent: navigator.userAgent,
   };
+  logBuffer.push(entry);
 }
 
-/** Добавить событие в память, не выполняя сетевой запрос. */
-export async function logEvent(
-  eventType: EventType,
-  eventData: Record<string, unknown> = {},
-): Promise<void> {
-  try {
-    buffer.push(buildRecord(eventType, eventData));
-  } catch (error) {
-    console.warn('[logger] logEvent failed:', eventType, error);
-  }
+/**
+ * Получить буфер логов (для отправки вместе с ответом).
+ */
+export function getLogBuffer(): LogEntry[] {
+  return [...logBuffer];
 }
 
-/** Получить снимок накопленного лога для включения в запрос. */
-export function getLogBuffer(): LogRecord[] {
-  return [...buffer];
-}
-
-/** Очистить накопленный лог после успешного saveAnswer/saveFeedback. */
-export function clearLogBuffer(): void {
-  buffer = [];
+/**
+ * Очистить буфер логов (после успешной отправки).
+ */
+export function clearLogBuffer() {
+  logBuffer = [];
 }
