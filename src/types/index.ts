@@ -1,3 +1,12 @@
+/**
+ * types/index.ts — глобальные TypeScript-интерфейсы для всего приложения.
+ *
+ * Обновления (v5, август 2026):
+ *  - ImageBlock: images[], layoutMode, gridColumns для сетки изображений.
+ *  - DnD: LayoutMode, layoutMode, gridColumns для зон и объектов.
+ *  - ImageMarkerBlock: новый блок с меткой на изображении.
+ */
+
 export interface VKUserInfo {
   id: string;
   first_name: string;
@@ -31,9 +40,14 @@ export interface CardWithStatus extends CardRecord {
   delta_seconds?: number;
 }
 
-export type BlockType = 'TextBlock' | 'ImageBlock' | 'InputField' | 'Button' | 'DragZone' | 'DragObject';
-
-export type LayoutMode = 'flow' | 'grid';
+export type BlockType =
+  | 'TextBlock'
+  | 'ImageBlock'
+  | 'InputField'
+  | 'Button'
+  | 'DragZone'
+  | 'DragObject'
+  | 'ImageMarkerBlock';
 
 export interface BaseBlock {
   id: string;
@@ -52,17 +66,20 @@ export interface ImageItem {
   alt?: string;
 }
 
+/** Режим раскладки изображений и DnD-объектов. */
+export type LayoutMode = 'auto' | 'grid';
+
 export interface ImageBlock extends BaseBlock {
   type: 'ImageBlock';
-  images: ImageItem[];
   src?: string;
   alt?: string;
   width?: number | 'full';
   maxImageWidth?: number;
   maxImageHeight?: number;
-  layoutMode?: LayoutMode;
-  gridColumns?: number;
   viewer?: boolean;
+  images?: ImageItem[];
+  layoutMode?: 'grid' | 'flex';
+  gridColumns?: number;
 }
 
 export interface InputFieldBlock extends BaseBlock {
@@ -86,7 +103,9 @@ export interface DragZoneBlock extends BaseBlock {
   zoneId: string;
   label: string;
   maxItems?: number;
+  /** Автоматическая раскладка или сетка объектов в зоне. */
   layoutMode?: LayoutMode;
+  /** Количество колонок для grid-режима. */
   gridColumns?: number;
 }
 
@@ -101,11 +120,34 @@ export interface DragObjectBlock extends BaseBlock {
   image?: string;
   maxImageSize?: number;
   imageSize?: number;
+  /** Опциональный режим внутренней раскладки объекта. */
   layoutMode?: LayoutMode;
+  /** Опциональное количество колонок для grid-режима. */
   gridColumns?: number;
 }
 
-export type Block = TextBlock | ImageBlock | InputFieldBlock | ButtonBlock | DragZoneBlock | DragObjectBlock;
+export interface ImageMarkerBlock extends BaseBlock {
+  type: 'ImageMarkerBlock';
+  src: string;
+  alt?: string;
+  maxImageWidth?: number;
+  maxImageHeight?: number;
+  viewer?: boolean;
+  correctX: number;
+  correctY: number;
+  errorPercent: number;
+  markerColor?: string;
+  markerSizePercent?: number;
+}
+
+export type Block =
+  | TextBlock
+  | ImageBlock
+  | InputFieldBlock
+  | ButtonBlock
+  | DragZoneBlock
+  | DragObjectBlock
+  | ImageMarkerBlock;
 
 export interface CardSchema {
   blocks: Block[];
@@ -127,6 +169,12 @@ export type DnDState = Record<string, string[]>;
 export interface AnswerPayload {
   inputs: Record<string, string>;
   dnd: DnDState;
+  marker?: {
+    userX: number;
+    userY: number;
+    actualErrorPercent: number;
+    isCorrect: boolean;
+  };
 }
 
 export interface LogRecord {
@@ -177,4 +225,7 @@ export type EventType =
   | 'offline_sync'
   | 'admin_save_card'
   | 'admin_login'
+  | 'marker_click'
+  | 'marker_move'
+  | 'marker_confirm'
   | string;

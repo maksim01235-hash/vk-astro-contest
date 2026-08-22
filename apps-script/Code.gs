@@ -1,24 +1,12 @@
 /**
  * apps-script/Code.gs — Google Apps Script backend for VK Contest.
  *
- * Версия: август 2026 (добавлен saveManualLog для кнопки "Отправить лог" в админке).
+ * Версия: август 2026 (добавлена поддержка ImageMarkerBlock).
  *
- * Возможности:
- *  - Кеширование Cards через CacheService.
- *  - Лёгкий getCardsList для админки.
- *  - user_answer: текстовые ответы схлопываются в строку;
- *    DnD-карточки всегда сохраняют полную JSON-структуру.
- *  - Лог пишется вместе с saveAnswer/saveFeedback, одной ячейкой на отправку.
- *  - saveManualLog — ручная отправка лога из админки (кнопка "Отправить лог").
- *  - Feedback записывается отдельными строками в лист Feedback.
- *  - Статистика считает уникальных ответивших пользователей.
- *  - Считает участников конкурса, подписанных на группу VK.
- *  - updateRow ищет ключ по РЕАЛЬНОМУ индексу столбца, а не по нулевому.
- *
- * Script Properties:
- *  VK_SERVICE_TOKEN              — service token VK API.
- *  VK_OWNER_ID                   — owner_id для проверки репостов.
- *  VK_GROUP_ID_FOR_MEMBERSHIP    — ID группы для подсчёта подписок среди участников.
+ * Обновления:
+ *  - checkMarkerAnswer: проверка координат метки.
+ *  - normalizeUserAnswer: поддержка поля marker.
+ *  - saveAnswer: вычисление actualErrorPercent и isCorrect для маркера.
  */
 
 var SHEET_USERS = 'Users';
@@ -31,8 +19,6 @@ var HEADERS = {
   Users: ['vk_id', 'name', 'reg_date', 'subscribed', 'last_activity'],
   Cards: ['card_id', 'title', 'release_datetime', 'post_id', 'json_schema', 'is_active'],
   Answers: ['id', 'vk_id', 'card_id', 'open_timestamp', 'submit_timestamp', 'delta_seconds', 'user_answer', 'has_reposted'],
-  // Старые строки Logs остаются архивом. Новые записи используют первые 3 столбца:
-  // vk_id, timestamp, log.
   Logs: ['id', 'timestamp', 'vk_id', 'event_type', 'event_data', 'page_url', 'user_agent'],
   Feedback: ['id', 'timestamp', 'vk_id', 'name', 'card_id', 'message'],
 };
@@ -149,12 +135,6 @@ function appendRow(name, obj) {
   }));
 }
 
-/**
- * Обновляет строку по совпадению значения в столбце key.
- * Индекс столбца key вычисляется через headers.indexOf(key), а не берётся
- * из нулевого столбца — иначе updateRow ломается для листов, где искомый
- * ключ не находится в первом столбце.
- */
 function updateRow(name, key, value, updates) {
   var sheet = getSheet(name);
   var data = sheet.getDataRange().getValues();
@@ -315,14 +295,72 @@ function saveUser(user) {
 // ============================================================
 
 /**
+ * Проверка ответа ImageMarkerBlock.
+ *
+ * @param {Object} markerData - { userX, userY }
+ * @param {Object} jsonSchema - схема карточки с блоками
+ * @returns {Object} { userX, userY, actualErrorPercent, isCorrect }
+ */
+function checkMarkerAnswer(markerData, jsonSchema) {
+  if (!markerData || !jsonSchema || !jsonSchema.blocks) {
+    return {
+      userX: markerData ? markerData.userX || 0 : 0,
+      userY: markerData ? markerData.userY || 0 : 0,
+      actualErrorPercent: 0,
+      isCorrect: false,
+    };
+  }
+
+  // Ищем первый ImageMarkerBlock.
+  var markerBlock = null;
+  for (var i = 0; i < jsonSchema.blocks.length; i++) {
+    if (jsonSchema.blocks[i].type === 'ImageMarkerBlock') {
+      markerBlock = jsonSchema.blocks[i];
+      break;
+    }
+  }
+
+  if (!markerBlock) {
+    return {
+      userX: markerData ? markerData.userX || 0 : 0,
+      userY: markerData ? markerData.userY || 0 : 0,
+      actualErrorPercent: 0,
+      isCorrect: false,
+    };
+  }
+
+  var correctX = parseFloat(markerBlock.correctX) || 50;
+  var correctY = parseFloat(markerBlock.correctY) || 50;
+  var errorPercent = parseFloat(markerBlock.errorPercent) || 10;
+
+  var userX = parseFloat(markerData.userX) || 0;
+  var userY = parseFloat(markerData.userY) || 0;
+
+  // Евклидово расстояние (радиус-вектор) в %.
+  var dx = Math.abs(userX - correctX);
+  var dy = Math.abs(userY - correctY);
+  var distancePercent = Math.sqrt(dx * dx + dy * dy);
+
+  var isCorrect = distancePercent <= errorPercent;
+
+  return {
+    userX: userX,
+    userY: userY,
+    actualErrorPercent: Math.round(distancePercent * 100) / 100,
+    isCorrect: isCorrect,
+  };
+}
+
+/**
  * Преобразует ответ в строку для Answers.user_answer.
  *
  * Правила:
  * 1. DnD есть (включая пустое/неразмещённое состояние) → полный JSON.
  * 2. DnD отсутствует, один inputs.answer → чистая строка ответа.
  * 3. DnD отсутствует, несколько inputs → значения через ";".
+ * 4. Marker есть → добавляется поле marker с результатами проверки.
  */
-function normalizeUserAnswer(rawAnswer) {
+function normalizeUserAnswer(rawAnswer, jsonSchema) {
   if (typeof rawAnswer !== 'string') {
     return JSON.stringify(rawAnswer || {});
   }
@@ -338,28 +376,52 @@ function normalizeUserAnswer(rawAnswer) {
 
   var inputs = parsed.inputs || {};
   var dnd = parsed.dnd || {};
+  var marker = parsed.marker || null;
   var dndKeys = Object.keys(dnd);
 
+  // Проверяем наличие маркера и вычисляем правильность.
+  var markerResult = null;
+  if (marker) {
+    markerResult = checkMarkerAnswer(marker, jsonSchema);
+  }
+
+  // Формируем итоговый ответ.
+  var result = {};
+
   if (dndKeys.length > 0) {
-    return JSON.stringify({
-      inputs: inputs,
-      dnd: dnd,
-    });
+    result.inputs = inputs;
+    result.dnd = dnd;
+    if (markerResult) {
+      result.marker = markerResult;
+    }
+    return JSON.stringify(result);
   }
 
   var inputKeys = Object.keys(inputs).sort();
 
   if (inputKeys.length === 1) {
-    return String(inputs[inputKeys[0]] === undefined ? '' : inputs[inputKeys[0]]);
+    result.answer = String(inputs[inputKeys[0]] === undefined ? '' : inputs[inputKeys[0]]);
+    if (markerResult) {
+      result.marker = markerResult;
+    }
+    return JSON.stringify(result);
   }
 
   if (inputKeys.length > 1) {
-    return inputKeys.map(function(key) {
+    result.answer = inputKeys.map(function(key) {
       return String(inputs[key] === undefined ? '' : inputs[key]);
     }).join(';');
+    if (markerResult) {
+      result.marker = markerResult;
+    }
+    return JSON.stringify(result);
   }
 
-  return '';
+  // Только маркер.
+  if (markerResult) {
+    result.marker = markerResult;
+  }
+  return JSON.stringify(result);
 }
 
 function saveAnswer(answer) {
@@ -369,6 +431,17 @@ function saveAnswer(answer) {
 
   var id = nextId(SHEET_ANSWERS);
 
+  // Получаем схему карточки для проверки маркера.
+  var card = getCard(answer.card_id);
+  var jsonSchema = null;
+  if (card && card.json_schema) {
+    try {
+      jsonSchema = JSON.parse(card.json_schema);
+    } catch (e) {
+      Logger.log('Failed to parse json_schema: ' + e);
+    }
+  }
+
   appendRow(SHEET_ANSWERS, {
     id: id,
     vk_id: answer.vk_id,
@@ -376,7 +449,7 @@ function saveAnswer(answer) {
     open_timestamp: answer.open_timestamp,
     submit_timestamp: answer.submit_timestamp || new Date().toISOString(),
     delta_seconds: answer.delta_seconds || 0,
-    user_answer: normalizeUserAnswer(answer.user_answer),
+    user_answer: normalizeUserAnswer(answer.user_answer, jsonSchema),
     has_reposted: answer.has_reposted || false,
   });
 
@@ -387,13 +460,6 @@ function saveAnswer(answer) {
   return { id: id };
 }
 
-/**
- * Новая запись лога: одна строка на одну отправку.
- * Первые три столбца в листе Logs:
- *   A — vk_id
- *   B — timestamp
- *   C — JSON массива накопленных событий.
- */
 function writeLog(vkId, events) {
   var sheet = getSheet(SHEET_LOGS);
   var nextRow = sheet.getLastRow() + 1;
@@ -404,11 +470,6 @@ function writeLog(vkId, events) {
   ]]);
 }
 
-/**
- * Ручная отправка лога из админ-панели (кнопка "Отправить лог").
- * Пишет в тот же лист Logs, тот же формат (vk_id | timestamp | log),
- * но с vk_id = "admin", чтобы отличать от пользовательских записей.
- */
 function saveManualLog(body) {
   var events = body.log;
   if (!events || !Array.isArray(events) || events.length === 0) {
@@ -501,10 +562,6 @@ function getStats() {
   });
 }
 
-/**
- * Число пользователей из Users, которые состоят в нужной группе VK.
- * groups.isMember принимает до 500 user_ids за запрос.
- */
 function getGroupSubscribedCount(vkIds) {
   var cache = getCache();
   var cached = cache.get('group_subscribed_count');

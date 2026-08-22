@@ -1,7 +1,8 @@
 /**
  * src/constants/index.ts — все константы приложения.
  *
- * Добавлено: API_ACTIONS.SAVE_MANUAL_LOG для кнопки "Отправить лог" в админке.
+ * Обновления (август 2026):
+ *  - Добавлены константы для ImageMarkerBlock.
  */
 
 export const SHEETS_API_URL =
@@ -62,3 +63,8 @@ export const API_ACTIONS = {
 export type ApiAction = (typeof API_ACTIONS)[keyof typeof API_ACTIONS];
 
 export const ACCENT_COLOR = '#3B82F6';
+
+/** Константы для ImageMarkerBlock. */
+export const DEFAULT_MARKER_COLOR = '#3B82F6';
+
+export const DEFAULT_MARKER_SIZE_PERCENT = 5;

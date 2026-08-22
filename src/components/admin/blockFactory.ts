@@ -1,58 +1,104 @@
+/**
+ * src/components/admin/blockFactory.ts — фабрика для создания блоков.
+ *
+ * Обновления (август 2026):
+ *  - ImageBlock: поддержка images[], layoutMode, gridColumns.
+ *  - ImageMarkerBlock: новый тип блока.
+ */
+
 import type { Block, BlockType } from '@/types';
-import { genId } from '@/utils/json';
 
 export function createBlock(type: BlockType, order: number): Block {
-  const id = genId();
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   switch (type) {
     case 'TextBlock':
-      return { id, type, order, content: '## Новый текст\nВведите содержание (поддержка Markdown).' };
+      return {
+        id,
+        type: 'TextBlock',
+        order,
+        content: '',
+      };
+
     case 'ImageBlock':
       return {
         id,
-        type,
+        type: 'ImageBlock',
         order,
-        images: [{ id: genId(), src: 'https://via.placeholder.com/600x400', alt: '' }],
+        src: '',
+        alt: '',
         width: 'full',
-        layoutMode: 'flow',
-        gridColumns: 2,
+        maxImageWidth: undefined,
+        maxImageHeight: undefined,
         viewer: true,
+        images: undefined,
+        layoutMode: 'flex',
+        gridColumns: 3,
       };
+
     case 'InputField':
       return {
         id,
-        type,
+        type: 'InputField',
         order,
-        label: 'Ваш ответ',
-        placeholder: 'Введите ответ',
+        label: '',
+        placeholder: '',
         inputType: 'text',
         required: false,
-        answerKey: 'answer',
+        answerKey: `answer_${id}`,
       };
+
     case 'Button':
-      return { id, type, order, label: 'Отправить ответ', action: 'submit', variant: 'primary' };
+      return {
+        id,
+        type: 'Button',
+        order,
+        label: 'Отправить',
+        action: 'submit',
+        variant: 'primary',
+      };
+
     case 'DragZone':
       return {
         id,
-        type,
+        type: 'DragZone',
         order,
-        zoneId: `zone_${Date.now()}`,
-        label: 'Новая зона',
-        maxItems: 0,
-        layoutMode: 'flow',
-        gridColumns: 2,
+        zoneId: `zone_${id}`,
+        label: 'Зона',
+        maxItems: undefined,
       };
+
     case 'DragObject':
       return {
         id,
-        type,
+        type: 'DragObject',
         order,
-        objectId: `obj_${Date.now()}`,
-        label: 'Новый объект',
+        objectId: `obj_${id}`,
+        label: '',
+        textPosition: 'left',
         allowedZones: [],
-        layoutMode: 'flow',
-        gridColumns: 2,
+        image: '',
+        maxImageSize: undefined,
+        imageSize: undefined,
       };
+
+    case 'ImageMarkerBlock':
+      return {
+        id,
+        type: 'ImageMarkerBlock',
+        order,
+        src: '',
+        alt: '',
+        maxImageWidth: undefined,
+        maxImageHeight: undefined,
+        viewer: true,
+        correctX: 50,
+        correctY: 50,
+        errorPercent: 10,
+        markerColor: '#3B82F6',
+        markerSizePercent: 5,
+      };
+
     default:
       throw new Error(`Unknown block type: ${type}`);
   }
