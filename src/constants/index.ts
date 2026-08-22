@@ -1,9 +1,7 @@
 /**
- * constants/index.ts — все константы приложения.
+ * src/constants/index.ts — все константы приложения.
  *
- * ВАЖНО: путь замены — vk-contest-mini-app/src/constants/index.ts
- * После замены в файле НЕ должно быть строк SAVE_LOG и SAVE_LOGS_BATCH.
- * Должна присутствовать строка GET_CARDS_LIST.
+ * Добавлено: API_ACTIONS.SAVE_MANUAL_LOG для кнопки "Отправить лог" в админке.
  */
 
 export const SHEETS_API_URL =
@@ -58,6 +56,7 @@ export const API_ACTIONS = {
   CHECK_REPOST: 'checkRepost',
   GET_SERVER_TIME: 'getServerTime',
   SYNC_OFFLINE: 'syncOffline',
+  SAVE_MANUAL_LOG: 'saveManualLog',
 } as const;
 
 export type ApiAction = (typeof API_ACTIONS)[keyof typeof API_ACTIONS];

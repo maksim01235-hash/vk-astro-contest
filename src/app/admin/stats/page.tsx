@@ -1,9 +1,7 @@
 /**
- * app/admin/stats/page.tsx — страница статистики.
+ * src/app/admin/stats/page.tsx — страница статистики.
  *
- * Обновления (v3, август 2026):
- *  - Добавлено число подписавшихся на группу VK (subscribed_group_count),
- *    отдельно от числа подписавшихся на уведомления (subscribed_count).
+ * Добавлено: кнопка "Отправить лог" (AdminLogButton) в шапке.
  */
 
 'use client';
@@ -26,6 +24,7 @@ import {
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
+import { AdminLogButton } from '@/components/admin/AdminLogButton';
 import { STORAGE_ADMIN_AUTH } from '@/constants';
 import { getRaw } from '@/utils/storage';
 import type { CardStat } from '@/types';
@@ -85,7 +84,10 @@ export default function StatsPage() {
   if (stats.length === 0) {
     return (
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-bold text-slate-900 mb-4">Статистика</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold text-slate-900">Статистика</h1>
+          <AdminLogButton page="admin/stats" />
+        </div>
         <div className="card-surface text-center text-slate-500">
           Пока нет данных. Ответы появятся после участия пользователей.
         </div>
@@ -117,10 +119,12 @@ export default function StatsPage() {
     <div className="animate-fade-in">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Статистика</h1>
-        <Link href="/admin" className="btn-secondary text-sm">← К конструктору</Link>
+        <div className="flex items-center gap-2">
+          <AdminLogButton page="admin/stats" />
+          <Link href="/admin" className="btn-secondary text-sm">← К конструктору</Link>
+        </div>
       </div>
 
-      {/* Число подписавшихся: уведомления и группа VK — раздельно. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div className="card-surface">
           <h3 className="text-sm font-semibold text-slate-700 mb-2">

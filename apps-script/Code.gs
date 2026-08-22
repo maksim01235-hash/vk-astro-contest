@@ -1,7 +1,7 @@
 /**
  * apps-script/Code.gs — Google Apps Script backend for VK Contest.
  *
- * Версия: август 2026.
+ * Версия: август 2026 (добавлен saveManualLog для кнопки "Отправить лог" в админке).
  *
  * Возможности:
  *  - Кеширование Cards через CacheService.
@@ -9,6 +9,7 @@
  *  - user_answer: текстовые ответы схлопываются в строку;
  *    DnD-карточки всегда сохраняют полную JSON-структуру.
  *  - Лог пишется вместе с saveAnswer/saveFeedback, одной ячейкой на отправку.
+ *  - saveManualLog — ручная отправка лога из админки (кнопка "Отправить лог").
  *  - Feedback записывается отдельными строками в лист Feedback.
  *  - Статистика считает уникальных ответивших пользователей.
  *  - Считает участников конкурса, подписанных на группу VK.
@@ -79,6 +80,7 @@ function doPost(e) {
       case 'saveFeedback': result = saveFeedback(body); break;
       case 'saveCard': result = saveCard(body); break;
       case 'syncOffline': result = syncOffline(body); break;
+      case 'saveManualLog': result = saveManualLog(body); break;
       default: return jsonOut({ ok: false, error: 'Unknown action: ' + action });
     }
 
@@ -149,9 +151,9 @@ function appendRow(name, obj) {
 
 /**
  * Обновляет строку по совпадению значения в столбце key.
- * ВАЖНО: индекс столбца key вычисляется через headers.indexOf(key),
- * а не всегда берётся из нулевого столбца — иначе updateRow ломается
- * для любых листов, где искомый ключ не находится в первом столбце.
+ * Индекс столбца key вычисляется через headers.indexOf(key), а не берётся
+ * из нулевого столбца — иначе updateRow ломается для листов, где искомый
+ * ключ не находится в первом столбце.
  */
 function updateRow(name, key, value, updates) {
   var sheet = getSheet(name);
@@ -296,10 +298,6 @@ function checkUser(vkId, name) {
   return user;
 }
 
-/**
- * Сохраняет пользователя. Используется для subscribed=true из useNotification.
- * findRow/updateRow теперь корректно ищут vk_id по его реальному индексу столбца.
- */
 function saveUser(user) {
   if (!user.vk_id) throw new Error('vk_id is required');
 
@@ -404,6 +402,21 @@ function writeLog(vkId, events) {
     new Date().toISOString(),
     JSON.stringify(events),
   ]]);
+}
+
+/**
+ * Ручная отправка лога из админ-панели (кнопка "Отправить лог").
+ * Пишет в тот же лист Logs, тот же формат (vk_id | timestamp | log),
+ * но с vk_id = "admin", чтобы отличать от пользовательских записей.
+ */
+function saveManualLog(body) {
+  var events = body.log;
+  if (!events || !Array.isArray(events) || events.length === 0) {
+    throw new Error('log is required and must be a non-empty array');
+  }
+
+  writeLog('admin', events);
+  return { saved: true, count: events.length };
 }
 
 // ============================================================

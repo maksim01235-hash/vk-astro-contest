@@ -1,7 +1,7 @@
 /**
  * src/lib/sheets/api.client.ts — клиент Google Apps Script REST API.
  *
- * Логи передаются только вместе с ответом или обратной связью.
+ * Добавлено: saveManualLog для кнопки "Отправить лог" в админке.
  */
 
 import axios, { AxiosError, AxiosInstance } from 'axios';
@@ -114,6 +114,14 @@ export const sheetsApi = {
     log?: LogRecord[];
   }): Promise<void> {
     await post('saveFeedback', feedback);
+  },
+
+  /**
+   * Ручная отправка лога из админки (кнопка "Отправить лог").
+   * Пишет одну строку в лист Logs с vk_id="admin" на стороне Apps Script.
+   */
+  async saveManualLog(log: LogRecord[]): Promise<{ saved: boolean; count: number }> {
+    return post<{ saved: boolean; count: number }>(API_ACTIONS.SAVE_MANUAL_LOG, { log });
   },
 
   async getStats(): Promise<CardStat[]> {
