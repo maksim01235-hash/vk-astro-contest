@@ -45,6 +45,7 @@ export default function AdminPage() {
   const [cardsLoading, setCardsLoading] = useState(false);
   const [selectedExistingId, setSelectedExistingId] = useState('');
   const [showJson, setShowJson] = useState(false);
+  const [saving, setSaving] = useState(false);
   const isFetchingRef = useRef(false);
   const toast = useToast();
 
@@ -131,15 +132,39 @@ export default function AdminPage() {
 
   const handleSave = async () => {
     if (!cardId || !title) { toast.error('Заполните ID и название карточки'); return; }
+
     const idProblems = collectIdProblems();
     if (idProblems.length > 0) {
       toast.error('Исправьте блоки: ' + idProblems.slice(0, 3).join('; ') + (idProblems.length > 3 ? ` …и ещё ${idProblems.length - 3}` : ''));
       return;
     }
+
+    const isEdit = !!selectedExistingId;
+
+    // Предпроверка занятости ID при создании новой карточки
+    // (финальная защита — на сервере, под лока́том).
+    if (!isEdit && existingCards.some((item) => String(item.card_id) === String(cardId))) {
+      toast.error(`Карточка с ID «${cardId}» уже существует. Откройте её в списке для редактирования.`);
+      return;
+    }
+
+    setSaving(true);
     try {
-      const card: CardRecord = { card_id: cardId, title, release_datetime: releaseDatetime ? new Date(releaseDatetime).toISOString() : new Date().toISOString(), post_id: postId, json_schema: safeStringify({ blocks }), is_active: isActive };
-      await sheetsApi.saveCard(card); toast.success(existingCards.some((item) => String(item.card_id) === String(cardId)) ? 'Карточка обновлена!' : 'Карточка сохранена!'); await loadExistingCards();
-    } catch (error) { toast.error(error instanceof Error ? error.message : 'Ошибка сохранения'); }
+      const card: CardRecord & { is_edit?: boolean } = { card_id: cardId, title, release_datetime: releaseDatetime ? new Date(releaseDatetime).toISOString() : new Date().toISOString(), post_id: postId, json_schema: safeStringify({ blocks }), is_active: isActive, is_edit: !!selectedExistingId };
+      const { created } = await sheetsApi.saveCard(card);
+      toast.success(created ? 'Карточка сохранена!' : 'Карточка обновлена!');
+      await loadExistingCards();
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Ошибка сохранения';
+      const message =
+        rawMessage === 'CARD_ID_TAKEN' ? `Карточка с ID «${cardId}» уже существует`
+        : rawMessage === 'CARD_NOT_FOUND' ? 'Редактируемая карточка не найдена в таблице'
+        : rawMessage === 'Предыдущий запрос ещё выполняется' ? rawMessage
+        : 'Ошибка сохранения';
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!authed) return <div className="flex flex-col items-center justify-center py-20 animate-fade-in"><div className="card-surface w-full max-w-md"><h1 className="mb-4 text-center text-2xl font-bold text-slate-900">Вход в админку</h1><form onSubmit={handleLogin} className="flex flex-col gap-4"><Input label="Пароль" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Введите пароль" error={authError || undefined} /><Button type="submit" loading={authChecking}>Войти</Button></form></div></div>;
@@ -148,6 +173,6 @@ export default function AdminPage() {
     <div className="card-surface mb-4"><h3 className="mb-3 text-sm font-semibold text-slate-700">Редактирование карточки</h3><div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end"><div className="flex flex-1 flex-col gap-1.5"><label className="text-sm font-medium text-slate-700">Выберите карточку для редактирования</label><select className="input-field" value={selectedExistingId} onChange={(e) => handleSelectExisting(e.target.value)} disabled={cardsLoading}><option value="">— Новая карточка —</option>{existingCards.map((card) => <option key={String(card.card_id)} value={String(card.card_id)}>{String(card.card_id)} — {card.title || '(без названия)'}</option>)}</select></div><Button variant="secondary" onClick={loadExistingCards} disabled={cardsLoading}>Обновить список</Button><Button variant="secondary" onClick={resetForm}>Новая карточка</Button></div>{cardsLoading && <p className="mt-2 text-xs text-slate-400">Загрузка карточек…</p>}</div>
     <div className="card-surface mb-4"><h3 className="mb-3 text-sm font-semibold text-slate-700">Параметры карточки</h3><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Input label="ID карточки" value={cardId} onChange={(e) => setCardId(e.target.value)} placeholder="1" disabled={!!selectedExistingId} /><Input label="Название" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Логическая задача" /><Input label="Дата/время открытия" type="datetime-local" value={releaseDatetime} onChange={(e) => setReleaseDatetime(e.target.value)} /><Input label="ID поста (для репоста)" value={postId} onChange={(e) => setPostId(e.target.value)} placeholder="123" /></div><label className="mt-3 flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />Карточка активна (видна пользователям)</label></div>
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3"><div><BlockToolbar onAdd={addBlock} /></div><div><Canvas blocks={blocks} onChange={setBlocks} selectedId={selectedId} onSelect={setSelectedId} /></div><div><PropertiesPanel block={blocks.find((block) => block.id === selectedId) || null} blockIndex={blocks.findIndex((block) => block.id === selectedId)} blocks={blocks} onChangeFor={handleBlockChange} /></div></div>
-    <div className="mt-4 flex items-center gap-3"><Button onClick={handleSave}>{selectedExistingId ? 'Сохранить изменения' : 'Сохранить карточку'}</Button><Button variant="secondary" onClick={() => setShowJson((value) => !value)}>{showJson ? 'Скрыть JSON' : 'Показать JSON'}</Button></div>{showJson && <pre className="card-surface mt-4 max-h-96 overflow-y-auto overflow-x-auto text-xs text-slate-700">{stringifyPretty({ blocks })}</pre>}
+    <div className="mt-4 flex items-center gap-3"><Button onClick={handleSave} loading={saving} disabled={saving}>{selectedExistingId ? 'Сохранить изменения' : 'Сохранить карточку'}</Button><Button variant="secondary" onClick={() => setShowJson((value) => !value)}>{showJson ? 'Скрыть JSON' : 'Показать JSON'}</Button></div>{showJson && <pre className="card-surface mt-4 max-h-96 overflow-y-auto overflow-x-auto text-xs text-slate-700">{stringifyPretty({ blocks })}</pre>}
   </div>;
 }

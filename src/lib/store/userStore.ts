@@ -19,6 +19,8 @@ interface UserState {
   isAuthed: boolean;
   /** Загрузка. */
   loading: boolean;
+  /** card_id карточек, на которые пользователь уже ответил (с сервера). */
+  answeredCardIds: string[];
 
   /** Установить VK-пользователя (после VK Bridge). */
   setVkUser: (user: VKUserInfo) => void;
@@ -26,6 +28,10 @@ interface UserState {
   setUserRecord: (record: UserRecord) => void;
   /** Установить флаг загрузки. */
   setLoading: (v: boolean) => void;
+  /** Сохранить список отвеченных карточек. */
+  setAnsweredCardIds: (ids: string[]) => void;
+  /** Отметить карточку отвеченной локально (без перезагрузки списка). */
+  addAnsweredCardId: (cardId: string) => void;
   /** Сбросить (выход). */
   reset: () => void;
   /** Восстановить из localStorage. */
@@ -37,6 +43,7 @@ export const useUserStore = create<UserState>((set) => ({
   userRecord: null,
   isAuthed: false,
   loading: false,
+  answeredCardIds: [],
 
   setVkUser: (user) => {
     setRaw(STORAGE_VK_USER_KEY, user);
@@ -47,9 +54,18 @@ export const useUserStore = create<UserState>((set) => ({
 
   setLoading: (v) => set({ loading: v }),
 
+  setAnsweredCardIds: (ids) => set({ answeredCardIds: ids }),
+
+  addAnsweredCardId: (cardId) =>
+    set((state) => (
+      state.answeredCardIds.includes(cardId)
+        ? state
+        : { answeredCardIds: [...state.answeredCardIds, cardId] }
+    )),
+
   reset: () => {
     remove(STORAGE_VK_USER_KEY);
-    set({ vkUser: null, userRecord: null, isAuthed: false, loading: false });
+    set({ vkUser: null, userRecord: null, isAuthed: false, loading: false, answeredCardIds: [] });
   },
 
   hydrate: () => {

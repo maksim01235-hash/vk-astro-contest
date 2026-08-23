@@ -27,7 +27,7 @@ export function useAuth() {
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Защита от одновременных повторных запусков авторизации.
+   * Защита от одновременных повторных autoAuth, чтобы checkUser не уходил 2–3 раза.
    * Нужна в том числе из-за React Strict Mode в режиме разработки.
    */
   const authInProgressRef = useRef(false);
@@ -62,6 +62,15 @@ export function useAuth() {
         user.name || `${user.first_name} ${user.last_name}`.trim(),
       );
       setUserRecord(record);
+
+      // Подгружаем, на какие карточки пользователь уже ответил
+      // (для статусов «Выполнено» и защиты от повторной отправки).
+      try {
+        const answered = await sheetsApi.getAnsweredCards(user.id);
+        useUserStore.getState().setAnsweredCardIds(answered);
+      } catch {
+        // Список отвеченных некритичен: статусы останутся локальными.
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Ошибка авторизации';
       setError(msg);

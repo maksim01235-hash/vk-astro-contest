@@ -11,6 +11,7 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCard } from '@/lib/hooks/useCard';
 import { useRepost } from '@/lib/hooks/useRepost';
@@ -38,7 +39,8 @@ function QuizContent() {
   const cardId = searchParams.get('id') || '';
 
   const { card, loading, error, openTime } = useCard(cardId);
-  const { vkUser } = useUserStore();
+  const vkUser = useUserStore((state) => state.vkUser);
+  const answeredCardIds = useUserStore((state) => state.answeredCardIds);
   const toast = useToast();
 
   const [submitting, setSubmitting] = useState(false);
@@ -111,6 +113,17 @@ function QuizContent() {
       const message = submitError instanceof Error
         ? submitError.message
         : 'Ошибка отправки ответа';
+
+      // Сервер отклонил повторный ответ: фиксируем статус и уводим на результат.
+      if (message === 'ANSWER_DUPLICATE') {
+        setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
+        useUserStore.getState().addAnsweredCardId(cardId);
+        clearLogBuffer();
+        toast.success('Ответ уже принят ранее');
+        router.push(`/thanks?card=${cardId}`);
+        return;
+      }
+
       await logEvent('api_error', { action: 'saveAnswer', error: message });
       toast.error(message);
     } finally {
@@ -178,6 +191,26 @@ function QuizContent() {
         <p className="text-slate-600">
           Время открытия: {new Date(card.release_datetime).toLocaleString('ru-RU')}
         </p>
+      </div>
+    );
+  }
+
+  // Уже отвечено (по серверному списку или локальному флагу) — форму не показываем.
+  const alreadyAnswered =
+    answeredCardIds.includes(cardId) ||
+    !!getRaw<{ submitted: boolean }>(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`)?.submitted;
+
+  if (alreadyAnswered) {
+    return (
+      <div className="card-surface text-center animate-fade-in">
+        <div className="text-5xl mb-4">✅</div>
+        <h2 className="text-xl font-semibold text-slate-900 mb-2">
+          Вы уже отвечали на эту карточку
+        </h2>
+        <p className="mb-5 text-slate-600">Повторные ответы не принимаются.</p>
+        <Link href={`/thanks?card=${cardId}`} className="btn-secondary">
+          Посмотреть результат
+        </Link>
       </div>
     );
   }
