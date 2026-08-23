@@ -4,6 +4,8 @@
  * Версия: август 2026 (добавлена поддержка ImageMarkerBlock).
  *
  * Обновления:
+ *  - writeLog: атомарный appendRow + LockService — без потери строк
+ *    при параллельных запросах (формат Logs прежний: 3 колонки).
  *  - checkInputsAnswer/checkDndAnswer: серверная проверка числовых ответов
  *    (процентный допуск) и раскладки DnD по эталонным объектам зоны.
  *  - normalizeUserAnswer: единый формат ответа { inputs, dnd } без схлопывания.
@@ -597,13 +599,22 @@ function saveAnswer(answer) {
 }
 
 function writeLog(vkId, events) {
-  var sheet = getSheet(SHEET_LOGS);
-  var nextRow = sheet.getLastRow() + 1;
-  sheet.getRange(nextRow, 1, 1, 3).setValues([[
-    vkId || 'anonymous',
-    new Date().toISOString(),
-    JSON.stringify(events),
-  ]]);
+  // Сериализуем записи в Logs: параллельные запросы без лока вычисляли бы
+  // одну и ту же «следующую строку» и затирали друг друга.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sheet = getSheet(SHEET_LOGS);
+    // Атомарное добавление в конец: три колонки
+    // [vk_id, timestamp, весь накопленный лог одной JSON-строкой].
+    sheet.appendRow([
+      vkId || 'anonymous',
+      new Date().toISOString(),
+      JSON.stringify(events),
+    ]);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function saveManualLog(body) {

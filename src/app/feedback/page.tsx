@@ -31,6 +31,8 @@ function FeedbackContent() {
     setSubmitting(true);
 
     try {
+      // Событие отправки фидбека пишется в буфер до снапшота — лог не бывает пустым.
+      logEvent('feedback_submit', { card_id: cardId });
       const log = getLogBuffer();
 
       await sheetsApi.saveFeedback({

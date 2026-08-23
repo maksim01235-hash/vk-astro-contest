@@ -216,6 +216,7 @@ export interface CardStat {
 export type EventType =
   | 'card_open'
   | 'card_submit'
+  | 'feedback_submit'
   | 'api_error'
   | 'dnd_change'
   | 'repost_click'

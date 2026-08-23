@@ -44,6 +44,7 @@ function QuizContent() {
   const [submitting, setSubmitting] = useState(false);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const repostCheckStarted = useRef(false);
+  const cardOpenLoggedRef = useRef('');
 
   const { hasRepost, check, doRepost, posting } = useRepost(
     cardId,
@@ -67,6 +68,9 @@ function QuizContent() {
     try {
       const submitMs = Date.now();
       const startMs = openTime || submitMs;
+
+      // Событие сабмита пишется в буфер до снапшота — лог не бывает пустым.
+      await logEvent('card_submit', { card_id: cardId });
       const log = getLogBuffer();
 
       const answer: AnswerRecord & { log?: typeof log } = {
@@ -82,12 +86,16 @@ function QuizContent() {
       };
 
       if (!navigator.onLine) {
+        // Событие офлайн-сохранения должно попасть в снапшот того же ответа:
+        // обновляем log после записи события, до постановки в очередь.
+        await logEvent('offline_save', { card_id: cardId });
+        answer.log = getLogBuffer();
+
         const queue = getRaw<AnswerRecord[]>(STORAGE_OFFLINE_QUEUE) || [];
         queue.push(answer);
         setRaw(STORAGE_OFFLINE_QUEUE, queue);
         setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
 
-        await logEvent('offline_save', { card_id: cardId });
         clearLogBuffer();
         toast.info('Нет соединения. Ответ сохранён и будет отправлен позже.');
         router.push(`/thanks?card=${cardId}&offline=1`);
@@ -128,6 +136,13 @@ function QuizContent() {
       void handleCardReady();
     }
   }, [card, handleCardReady, loading]);
+
+  /** Зафиксировать открытие карточки в буфере лога — один раз на карточку. */
+  useEffect(() => {
+    if (!card || loading || cardOpenLoggedRef.current === card.card_id) return;
+    cardOpenLoggedRef.current = card.card_id;
+    logEvent('card_open', { card_id: card.card_id });
+  }, [card, loading]);
 
   if (!cardId) {
     return (

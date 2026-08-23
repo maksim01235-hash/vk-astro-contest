@@ -2,9 +2,14 @@
  * lib/sheets/logger.ts — логирование событий в буфере.
  *
  * Логи копятся в памяти и отправляются только вместе с ответом или фидбэком.
+ *
+ * logEvent синхронна (статический импорт стора): событие попадает в буфер
+ * немедленно и гарантированно присутствует в снапшоте при последующем
+ * getLogBuffer() — даже если отправка происходит в том же обработчике.
  */
 
-import type { EventType, LogRecord } from '@/types';
+import { useUserStore } from '@/lib/store/userStore';
+import type { EventType } from '@/types';
 
 interface LogEntry {
   timestamp: string;
@@ -20,17 +25,16 @@ let logBuffer: LogEntry[] = [];
 /**
  * Добавить событие в буфер логов.
  */
-export async function logEvent(eventType: EventType, eventData: Record<string, unknown>) {
-  const vkUser = await import('@/lib/store/userStore').then((m) => m.useUserStore.getState().vkUser);
-  const entry: LogEntry = {
+export function logEvent(eventType: EventType, eventData: Record<string, unknown>) {
+  const vkUser = useUserStore.getState().vkUser;
+  logBuffer.push({
     timestamp: new Date().toISOString(),
     vk_id: vkUser?.id || 'anonymous',
     event_type: eventType,
     event_data: JSON.stringify(eventData),
     page_url: window.location.href,
     user_agent: navigator.userAgent,
-  };
-  logBuffer.push(entry);
+  });
 }
 
 /**
