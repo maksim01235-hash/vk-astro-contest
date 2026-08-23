@@ -62,7 +62,11 @@ export function ImageBlockView({ block }: Props) {
               key={image.id}
               type="button"
               onClick={() => openViewer(index)}
-              className="relative aspect-square overflow-hidden rounded-xl bg-slate-100 text-left"
+              disabled={block.viewer === false}
+              className={clsx(
+                'relative aspect-square overflow-hidden rounded-xl bg-slate-100 text-left',
+                block.viewer === false ? 'cursor-default' : 'cursor-zoom-in',
+              )}
               aria-label={`Открыть изображение ${index + 1}`}
             >
               <img
@@ -81,7 +85,11 @@ export function ImageBlockView({ block }: Props) {
               key={image.id}
               type="button"
               onClick={() => openViewer(index)}
-              className="relative aspect-square w-full overflow-hidden rounded-xl bg-slate-100 text-left sm:w-[calc(50%-0.375rem)] md:w-[calc(33.333%-0.5rem)] lg:w-[calc(25%-0.5625rem)]"
+              disabled={block.viewer === false}
+              className={clsx(
+                'relative aspect-square w-full overflow-hidden rounded-xl bg-slate-100 text-left sm:w-[calc(50%-0.375rem)] md:w-[calc(33.333%-0.5rem)] lg:w-[calc(25%-0.5625rem)]',
+                block.viewer === false ? 'cursor-default' : 'cursor-zoom-in',
+              )}
               aria-label={`Открыть изображение ${index + 1}`}
             >
               <img

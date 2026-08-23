@@ -31,6 +31,8 @@ interface Props {
   onMarkerChange?: (position: MarkerPosition) => void;
   /** Показывать в фуллскрине бейдж с текущими координатами метки (режим админа). */
   showMarkerCoords?: boolean;
+  /** Отключить горизонтальное пролистывание/зацикливание (для одиночных маркерных фото). */
+  disableSwipe?: boolean;
 }
 
 type Dimensions = Record<string, { width: number; height: number }>;
@@ -39,14 +41,23 @@ type PswpSlide = {
   data: { src?: string; width?: number; height?: number };
   currZoomLevel: number;
   pan: { x: number; y: number };
+  /** Холдер (.pswp__item), в который сейчас вставлен слайд. */
+  holderElement?: HTMLElement | null;
   zoomTo: (level: number, centerPoint?: { x: number; y: number }, transitionDuration?: number | false) => void;
-  toggleZoom: (centerPoint?: { x: number; y: number }) => void;
 };
 
 type PswpCore = {
   currIndex: number;
   currSlide?: PswpSlide;
   viewportSize: { x: number; y: number };
+  /**
+   * Холдеров слайдов ровно три, они циклически переиспользуются;
+   * активный слайд всегда находится в itemHolders[1]
+   * (в исходниках v5: «Slide in the 2nd holder is always active»).
+   */
+  mainScroll?: {
+    itemHolders?: Array<{ el: HTMLElement; slide?: PswpSlide }>;
+  };
   ui: {
     registerElement: (config: {
       name: string;
@@ -62,10 +73,44 @@ type PswpCore = {
     }) => void;
   };
   close: () => void;
-  on: (name: string, callback: () => void) => void;
+  on: (name: string, callback: (payload?: unknown) => void) => void;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/** Шаг кнопок +/− относительно текущего уровня зума. */
+const ZOOM_STEP = 1.5;
+
+/**
+ * Активный слайд: DOM-элемент картинки и её экранная рамка.
+ *
+ * ВАЖНО: холдеров слайдов (.pswp__item) в v5 ровно три, они циклически
+ * переиспользуются, и активный слайд ВСЕГДА находится во втором холдере
+ * (itemHolders[1]; в исходниках: «Slide in the 2nd holder is always active»).
+ * Поиск по индексу слайда (children[currIndex]) недопустим — он попадает
+ * в скрытый/пустой холдер.
+ *
+ * Прямое измерение через getBoundingClientRect — единственный источник,
+ * корректный во время анимаций зума, при колесе мыши и жестах.
+ */
+function getActiveImageRect(pswp: PswpCore | null): { rect: DOMRect; img: HTMLElement } | null {
+  if (!pswp) return null;
+
+  const holder =
+    pswp.currSlide?.holderElement
+    ?? pswp.mainScroll?.itemHolders?.[1]?.el
+    // Фолбэк по DOM: средний холдер всегда активен (индекс 1, не currIndex!).
+    ?? (document.querySelectorAll('.pswp__item')[1] as HTMLElement | undefined);
+
+  const img = holder?.querySelector<HTMLElement>('.pswp__img');
+  if (!img) return null;
+
+  const rect = img.getBoundingClientRect();
+  // Слайд ещё не отрисован — считаем неготовым, чтобы не мигать пустыми координатами.
+  if (!rect.width && !rect.height) return null;
+
+  return { rect, img };
+}
 
 function loadDimensions(images: PhotoSwipeImage[]): Promise<Dimensions> {
   return Promise.all(
@@ -88,6 +133,7 @@ export function PhotoSwipeViewer({
   markerSizePercent = 5,
   onMarkerChange,
   showMarkerCoords = false,
+  disableSwipe = false,
 }: Props) {
   const lightboxRef = useRef<PhotoSwipeLightbox | null>(null);
   const pswpRef = useRef<PswpCore | null>(null);
@@ -99,6 +145,8 @@ export function PhotoSwipeViewer({
   const syncRafRef = useRef<number | null>(null);
   // После перетаскивания приходит click — подавляем его, чтобы не разармировать метку.
   const suppressClickRef = useRef(false);
+  /** Базовый (fit) уровень зума активного слайда — пол для кнопки «−». */
+  const baselineZoomRef = useRef(1);
   const [ready, setReady] = useState(false);
 
   // Свежие колбэки и пропсы в рефах: пересоздание стрелок родителем (например, при
@@ -106,11 +154,13 @@ export function PhotoSwipeViewer({
   const onCloseRef = useRef(onClose);
   const onMarkerChangeRef = useRef(onMarkerChange);
   const showMarkerCoordsRef = useRef(showMarkerCoords);
+  const disableSwipeRef = useRef(disableSwipe);
 
   markerRef.current = marker;
   onCloseRef.current = onClose;
   onMarkerChangeRef.current = onMarkerChange;
   showMarkerCoordsRef.current = showMarkerCoords;
+  disableSwipeRef.current = disableSwipe;
 
   /**
    * Обновляет бейдж координат метки в фуллскрине (режим админа).
@@ -125,81 +175,65 @@ export function PhotoSwipeViewer({
     badge.textContent = `X: ${Math.round(pos.x)}%, Y: ${Math.round(pos.y)}%`;
   }, []);
   /**
-   * Рамка миникарты строится по фактической матрице трансформации:
-   * visible origin в координатах исходной картинки = -pan / zoom.
-   * Это надёжнее panBounds: они могут быть одинаковыми на оси, где
-   * изображение центрировано, и не отражают текущую позицию drag.
+   * Рамка видимой области на миникарте считается из экранных прямоугольников
+   * активной картинки и области просмотра — точна в любой момент анимации.
+   * Контейнер миникарты получает пропорции самой картинки (а не квадрат),
+   * поэтому рамка не искажается. При полном обзоре (zoom ≈ fit/1x) миникарта
+   * скрывается за ненадобностью.
    */
   const syncMinimap = useCallback(() => {
     const pswp = pswpRef.current;
-    const slide = pswp?.currSlide;
-    if (!pswp || !slide) return;
+    if (!pswp) return;
 
-    const root = document.querySelector('.pswp');
+    const root = document.querySelector<HTMLElement>('.pswp');
+    const minimap = root?.querySelector<HTMLElement>('.contest-pswp__minimap');
     const minimapImage = root?.querySelector<HTMLImageElement>('.contest-pswp__minimap-image');
     const viewport = root?.querySelector<HTMLElement>('.contest-pswp__minimap-viewport');
     const current = images[pswp.currIndex];
-    if (!minimapImage || !viewport || !current) return;
+    if (!root || !minimap || !minimapImage || !viewport || !current) return;
 
+    const found = getActiveImageRect(pswp);
+    if (!found) return;
+
+    const vr = root.getBoundingClientRect();
+    const r = found.rect;
+    const fullyVisible =
+      r.width <= vr.width + 0.5 &&
+      r.height <= vr.height + 0.5 &&
+      r.left >= vr.left - 0.5 &&
+      r.top >= vr.top - 0.5;
+    minimap.style.display = fullyVisible ? 'none' : 'block';
+    if (fullyVisible) return;
+
+    minimap.style.aspectRatio = `${Math.max(r.width, 1)} / ${Math.max(r.height, 1)}`;
     if (minimapImage.src !== current.src) minimapImage.src = current.src;
 
-    const sourceWidth = Math.max(slide.data.width || 1, 1);
-    const sourceHeight = Math.max(slide.data.height || 1, 1);
-    const zoom = Math.max(slide.currZoomLevel || 1, 0.0001);
-    const viewportWidth = Math.max(pswp.viewportSize.x || 1, 1);
-    const viewportHeight = Math.max(pswp.viewportSize.y || 1, 1);
+    const visibleLeftPct = clamp(((vr.left - r.left) / r.width) * 100, 0, 100);
+    const visibleTopPct = clamp(((vr.top - r.top) / r.height) * 100, 0, 100);
+    const visibleWidthPct = clamp(((vr.right - r.left) / r.width) * 100, 0, 100) - visibleLeftPct;
+    const visibleHeightPct = clamp(((vr.bottom - r.top) / r.height) * 100, 0, 100) - visibleTopPct;
 
-    // Размер видимой области относительно оригинальной картинки.
-    const visibleImageWidth = viewportWidth / zoom;
-    const visibleImageHeight = viewportHeight / zoom;
-    const visibleWidthPercent = clamp((visibleImageWidth / sourceWidth) * 100, 0, 100);
-    const visibleHeightPercent = clamp((visibleImageHeight / sourceHeight) * 100, 0, 100);
-
-    // Координаты левого верхнего угла viewport в координатах картинки.
-    // transform: screen = pan + imageCoordinate * zoom.
-    // Поэтому imageCoordinate = (screen - pan) / zoom.
-    const rawOriginX = -slide.pan.x / zoom;
-    const rawOriginY = -slide.pan.y / zoom;
-
-    // Когда изображение меньше viewport по одной оси, PhotoSwipe центрирует его.
-    // Компенсируем свободное пространство, чтобы рамка оставалась по центру.
-    const imageRenderedWidth = sourceWidth * zoom;
-    const imageRenderedHeight = sourceHeight * zoom;
-    const freeX = Math.max(0, viewportWidth - imageRenderedWidth) / 2;
-    const freeY = Math.max(0, viewportHeight - imageRenderedHeight) / 2;
-    const originX = (freeX - slide.pan.x) / zoom;
-    const originY = (freeY - slide.pan.y) / zoom;
-
-    const maxOriginX = Math.max(0, sourceWidth - visibleImageWidth);
-    const maxOriginY = Math.max(0, sourceHeight - visibleImageHeight);
-    const clippedOriginX = clamp(maxOriginX > 0 ? originX : sourceWidth / 2 - visibleImageWidth / 2, 0, Math.max(0, sourceWidth - visibleImageWidth));
-    const clippedOriginY = clamp(maxOriginY > 0 ? originY : sourceHeight / 2 - visibleImageHeight / 2, 0, Math.max(0, sourceHeight - visibleImageHeight));
-
-    const centerXPercent = clamp(((clippedOriginX + visibleImageWidth / 2) / sourceWidth) * 100, 0, 100);
-    const centerYPercent = clamp(((clippedOriginY + visibleImageHeight / 2) / sourceHeight) * 100, 0, 100);
-
-    viewport.style.width = `${visibleWidthPercent}%`;
-    viewport.style.height = `${visibleHeightPercent}%`;
-    viewport.style.left = `${centerXPercent}%`;
-    viewport.style.top = `${centerYPercent}%`;
+    // CSS у viewport: translate(-50%,-50%) — задаём центр рамки.
+    viewport.style.width = `${visibleWidthPct}%`;
+    viewport.style.height = `${visibleHeightPct}%`;
+    viewport.style.left = `${visibleLeftPct + visibleWidthPct / 2}%`;
+    viewport.style.top = `${visibleTopPct + visibleHeightPct / 2}%`;
   }, [images]);
 
   const syncMarker = useCallback(() => {
-    const pswp = pswpRef.current;
     const position = markerRef.current;
-    if (!pswp?.currSlide || !position) return;
+    const found = getActiveImageRect(pswpRef.current);
+    if (!position || !found) return;
 
-    const root = document.querySelector('.pswp');
-    const dot = root?.querySelector<HTMLElement>('.contest-pswp__marker');
+    const dot = document.querySelector<HTMLElement>('.contest-pswp__marker');
     if (!dot) return;
 
-    const slide = pswp.currSlide;
-    const zoom = slide.currZoomLevel || 1;
-    const sourceWidth = slide.data.width || 1;
-    const sourceHeight = slide.data.height || 1;
-    const markerX = slide.pan.x + sourceWidth * zoom * (position.x / 100);
-    const markerY = slide.pan.y + sourceHeight * zoom * (position.y / 100);
-    const size = Math.max(20, Math.min(72, Math.min(sourceWidth, sourceHeight) * zoom * (markerSizePercent / 100)));
+    // Позиция из экранной рамки активной картинки — метка «приклеена» к точке
+    // фото и плавно следует анимации зума (кнопки, колесо, щипок).
+    const { rect } = found;
+    const markerX = rect.left + rect.width * (position.x / 100);
+    const markerY = rect.top + rect.height * (position.y / 100);
+    const size = Math.max(20, Math.min(72, Math.min(rect.width, rect.height) * (markerSizePercent / 100)));
 
     dot.style.left = `${markerX}px`;
     dot.style.top = `${markerY}px`;
@@ -247,20 +281,18 @@ export function PhotoSwipeViewer({
   }, [applyMarkerVisual]);
 
   const moveMarkerFromPointer = useCallback((clientX: number, clientY: number) => {
-    const pswp = pswpRef.current;
-    if (!pswp?.currSlide || !markerRef.current || !draggingRef.current) return;
+    if (!draggingRef.current || !markerRef.current) return;
 
-    const slide = pswp.currSlide;
-    const zoom = slide.currZoomLevel || 1;
-    const width = slide.data.width || 1;
-    const height = slide.data.height || 1;
+    const found = getActiveImageRect(pswpRef.current);
+    if (!found) return;
+
     const next = {
-      x: clamp(((clientX - slide.pan.x) / (width * zoom)) * 100, 0, 100),
-      y: clamp(((clientY - slide.pan.y) / (height * zoom)) * 100, 0, 100),
+      x: clamp(((clientX - found.rect.left) / found.rect.width) * 100, 0, 100),
+      y: clamp(((clientY - found.rect.top) / found.rect.height) * 100, 0, 100),
     };
 
     // Экранная позиция известна точно — двигаем точку сразу,
-    // не дожидаясь перерендера родителя и следующего zoomPanUpdate.
+    // не дожидаясь перерендера родителя и следующего кадра синхронизации.
     const dot = document.querySelector<HTMLElement>('.contest-pswp__marker');
     if (dot) {
       dot.style.left = `${clientX}px`;
@@ -298,12 +330,45 @@ export function PhotoSwipeViewer({
       wheelToZoom: true,
       pinchToClose: true,
       closeOnVerticalDrag: true,
-      arrowKeys: images.length > 1,
+      // Для одиночных маркерных фото запрещаем зацикленное пролистывание и
+      // перелистывание при панорамировании (семантика; жестовый драг контейнера
+      // дополнительно блокируется обёрткой mainScroll.moveTo выше).
+      loop: !disableSwipe,
+      allowPanToNext: !disableSwipe,
+      arrowKeys: images.length > 1 && !disableSwipe,
     });
 
     lightbox.on('uiRegister', () => {
       const pswp = lightbox.pswp as unknown as PswpCore;
       pswpRef.current = pswp;
+
+      /** Запомнить базовый (fit) уровень зума текущего слайда. */
+      const captureBaseline = () => {
+        baselineZoomRef.current = pswp.currSlide?.currZoomLevel || 1;
+      };
+      requestAnimationFrame(captureBaseline);
+
+      /**
+       * Жёсткое отключение жестового горизонтального пролистывания для одиночных
+       * маркерных фото. На fit-зуме DragHandler двигает контейнер напрямую —
+       * mainScroll.moveTo(x, dragging=true), минуя опции loop/allowPanToNext.
+       * Блокируем только жестовые вызовы (dragging === true); программные
+       * анимации слайдов не трогаем. Панорамирование при зуме идёт через
+       * slide.pan и остаётся доступным.
+       */
+      if (disableSwipeRef.current) {
+        const mainScroll = pswp.mainScroll as {
+          moveTo?: (x: number, dragging?: boolean) => void;
+        } | undefined;
+
+        if (mainScroll && typeof mainScroll.moveTo === 'function') {
+          const originalMoveTo = mainScroll.moveTo.bind(mainScroll);
+          mainScroll.moveTo = (x, dragging) => {
+            if (dragging === true) return;
+            originalMoveTo(x, dragging);
+          };
+        }
+      }
 
       pswp.ui.registerElement({
         name: 'contest-close',
@@ -330,10 +395,18 @@ export function PhotoSwipeViewer({
         className: 'contest-pswp__zoom',
         html: '<button type="button" class="contest-pswp__zoom-in" aria-label="Увеличить">+</button><button type="button" class="contest-pswp__zoom-out" aria-label="Уменьшить">−</button>',
         onInit: (element, instance) => {
-          element.querySelector<HTMLButtonElement>('.contest-pswp__zoom-in')?.addEventListener('click', () => instance.currSlide?.toggleZoom());
+          const center = () => ({ x: instance.viewportSize.x / 2, y: instance.viewportSize.y / 2 });
+          // Плавный шаг вверх; потолок — 8x от базового (fit) уровня слайда.
+          element.querySelector<HTMLButtonElement>('.contest-pswp__zoom-in')?.addEventListener('click', () => {
+            const slide = instance.currSlide;
+            if (!slide) return;
+            slide.zoomTo(Math.min(slide.currZoomLevel * ZOOM_STEP, baselineZoomRef.current * 8), center(), 250);
+          });
+          // Плавный шаг вниз; пол — базовый уровень (картинка целиком видна).
           element.querySelector<HTMLButtonElement>('.contest-pswp__zoom-out')?.addEventListener('click', () => {
             const slide = instance.currSlide;
-            if (slide) slide.zoomTo(1, { x: instance.viewportSize.x / 2, y: instance.viewportSize.y / 2 }, 250);
+            if (!slide) return;
+            slide.zoomTo(Math.max(slide.currZoomLevel / ZOOM_STEP, baselineZoomRef.current), center(), 250);
           });
         },
       });
@@ -408,7 +481,12 @@ export function PhotoSwipeViewer({
         }
       }
 
-      pswp.on('change', () => { disarmMarker(); draggingRef.current = false; });
+      pswp.on('change', () => { disarmMarker(); draggingRef.current = false; captureBaseline(); });
+      // Базовый (fit) уровень зума — обновляется при загрузке слайда и переключении.
+      pswp.on('loadComplete', (payload) => {
+        const slide = (payload as { slide?: PswpSlide } | undefined)?.slide;
+        if (slide) baselineZoomRef.current = slide.currZoomLevel || 1;
+      });
 
       /**
        * Непрерывная синхронизация, пока просмотр открыт: покрывает зум колесом,
@@ -452,7 +530,7 @@ export function PhotoSwipeViewer({
       draggingRef.current = false;
       disarmMarker();
     };
-  }, [applyMarkerVisual, armMarker, disarmMarker, images, initialIndex, moveMarkerFromPointer, open, ready, syncMarker, syncMinimap]);
+  }, [applyMarkerVisual, armMarker, disableSwipe, disarmMarker, images, initialIndex, moveMarkerFromPointer, open, ready, syncMarker, syncMinimap]);
 
   useEffect(() => {
     if (!open && lightboxRef.current) lightboxRef.current.destroy();
@@ -470,7 +548,7 @@ export function PhotoSwipeViewerStyles() {
       .pswp .contest-pswp__close, .pswp .contest-pswp__zoom button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:0; color:#fff; background:rgba(7,12,20,.78); box-shadow:0 4px 18px rgba(0,0,0,.38); cursor:pointer; }
       .pswp .contest-pswp__close { position:fixed; top:calc(16px + env(safe-area-inset-top, 0px)); left:calc(16px + env(safe-area-inset-left, 0px)); width:56px; height:56px; border-radius:50%; z-index:10010; }
       .pswp .contest-pswp__close svg { width:30px; height:30px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; }
-      .pswp .contest-pswp__minimap { position:fixed; left:calc(16px + env(safe-area-inset-left, 0px)); bottom:calc(16px + env(safe-area-inset-bottom, 0px)); width:min(30vw,300px); aspect-ratio:1; overflow:hidden; border:2px solid rgba(255,255,255,.88); border-radius:9px; background:#0b0f16; box-shadow:0 4px 18px rgba(0,0,0,.48); z-index:10010; }
+      .pswp .contest-pswp__minimap { display:none; position:fixed; left:calc(16px + env(safe-area-inset-left, 0px)); bottom:calc(16px + env(safe-area-inset-bottom, 0px)); width:min(22vw,220px); overflow:hidden; border:2px solid rgba(255,255,255,.88); border-radius:9px; background:#0b0f16; box-shadow:0 4px 18px rgba(0,0,0,.48); z-index:10010; }
       .pswp .contest-pswp__minimap-image { display:block; width:100%; height:100%; object-fit:contain; background:#0b0f16; }
       .pswp .contest-pswp__minimap-viewport { position:absolute; box-sizing:border-box; border:2px solid #fff; background:rgba(59,130,246,.22); transform:translate(-50%,-50%); pointer-events:none; }
       .pswp .contest-pswp__zoom { position:fixed; display:flex; flex-direction:column; gap:10px; right:calc(16px + env(safe-area-inset-right, 0px)); bottom:calc(16px + env(safe-area-inset-bottom, 0px)); z-index:10010; }
@@ -481,7 +559,7 @@ export function PhotoSwipeViewerStyles() {
       @keyframes contest-marker-pulse { 0%,100% { box-shadow:0 0 0 3px rgba(59,130,246,.65),0 4px 14px rgba(0,0,0,.45); } 50% { box-shadow:0 0 0 14px rgba(59,130,246,0),0 4px 14px rgba(0,0,0,.45); } }
       .pswp .contest-pswp__marker-hint { display:none; position:fixed; top:calc(20px + env(safe-area-inset-top, 0px)); left:50%; transform:translateX(-50%); padding:8px 16px; border-radius:999px; background:rgba(7,12,20,.78); color:#fff; font-size:13px; white-space:nowrap; pointer-events:none; z-index:10012; }
       .pswp .contest-pswp__marker-coords { position:fixed; top:calc(20px + env(safe-area-inset-top, 0px)); right:calc(16px + env(safe-area-inset-right, 0px)); padding:8px 14px; border-radius:999px; background:rgba(7,12,20,.78); color:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; white-space:nowrap; pointer-events:none; z-index:10012; }
-      @media (max-width:640px) { .pswp .contest-pswp__close { top:calc(12px + env(safe-area-inset-top, 0px)); left:calc(12px + env(safe-area-inset-left, 0px)); width:50px; height:50px; } .pswp .contest-pswp__minimap { left:calc(12px + env(safe-area-inset-left, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); width:min(30vw,180px); } .pswp .contest-pswp__zoom { right:calc(12px + env(safe-area-inset-right, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); } .pswp .contest-pswp__zoom button { width:46px; height:46px; font-size:30px; } }
+      @media (max-width:640px) { .pswp .contest-pswp__close { top:calc(12px + env(safe-area-inset-top, 0px)); left:calc(12px + env(safe-area-inset-left, 0px)); width:50px; height:50px; } .pswp .contest-pswp__minimap { left:calc(12px + env(safe-area-inset-left, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); width:min(22vw,140px); } .pswp .contest-pswp__zoom { right:calc(12px + env(safe-area-inset-right, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); } .pswp .contest-pswp__zoom button { width:46px; height:46px; font-size:30px; } }
     `}</style>
   );
 }
