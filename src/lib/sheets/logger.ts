@@ -2,9 +2,17 @@
  * lib/sheets/logger.ts — логирование событий в буфере.
  *
  * Логи копятся в памяти и отправляются только вместе с ответом или фидбэком.
+ *
+ * Обновление (август 2026): жёсткий лимит размера буфера. Раньше события
+ * вроде marker_move могли раздуть payload saveAnswer до десятков КБ, что на
+ * слабой сети приводило к таймаутам и «пропадающим» логам. При переполнении
+ * самые старые события отбрасываются — свежая диагностика важнее полной истории.
  */
 
 import type { EventType, LogRecord } from '@/types';
+
+/** Максимум событий в буфере (одна отправка не тяжелее ~50–70 КБ). */
+const MAX_LOG_BUFFER = 200;
 
 interface LogEntry {
   timestamp: string;
@@ -31,6 +39,10 @@ export async function logEvent(eventType: EventType, eventData: Record<string, u
     user_agent: navigator.userAgent,
   };
   logBuffer.push(entry);
+
+  if (logBuffer.length > MAX_LOG_BUFFER) {
+    logBuffer.splice(0, logBuffer.length - MAX_LOG_BUFFER);
+  }
 }
 
 /**

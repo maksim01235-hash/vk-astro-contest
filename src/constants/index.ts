@@ -1,8 +1,13 @@
 /**
  * src/constants/index.ts — все константы приложения.
  *
- * Обновления (август 2026):
- *  - Удалены константы для ImageMarkerBlock.
+ * Обновления (август 2026, сервер-как-источник-истины):
+ *  - Префикс localStorage с версией схемы (v2): при несовместимых изменениях
+ *    ключей старые данные гарантированно не читаются новой логикой.
+ *  - Кеш списка карточек сокращён до 2 минут.
+ *  - Удалены локальные ключи репоста, уведомлений и флага «ответил»:
+ *    эти данные живут в Google Sheets (Answers / Users).
+ *  - Новый экшен MARK_CARD_OPEN — время первого просмотра карточки (лист Opens).
  */
 
 export const SHEETS_API_URL =
@@ -18,25 +23,34 @@ export const RETRY_COUNT = 3;
 
 export const RETRY_BASE_DELAY_MS = 1000;
 
-export const CARDS_CACHE_TTL_MS = 5 * 60 * 1000;
+/** Время жизни клиентского кеша списка карточек. */
+export const CARDS_CACHE_TTL_MS = 2 * 60 * 1000;
 
-export const REPOST_CACHE_TTL_MS = 60 * 60 * 1000;
+/**
+ * Версия схемы локального хранилища. При изменении формата ключей
+ * поднимите версию — migrateLegacyStorage() удалит ключи прошлых версий.
+ */
+export const STORAGE_SCHEMA_VERSION = 'v2';
 
-export const STORAGE_PREFIX = 'vk_contest_';
+export const STORAGE_PREFIX = `vk_contest_${STORAGE_SCHEMA_VERSION}_`;
+
+/** Префикс ключей всех предыдущих версий хранилища (для одноразовой чистки). */
+export const LEGACY_STORAGE_PREFIX = 'vk_contest_';
 
 export const STORAGE_CARDS_KEY = `${STORAGE_PREFIX}cards_cache`;
 
-export const STORAGE_OPEN_TIME_PREFIX = `${STORAGE_PREFIX}card_`;
-
-export const STORAGE_REPOST_PREFIX = `${STORAGE_PREFIX}repost_`;
+/**
+ * Fallback времени первого открытия карточки. Используется ТОЛЬКО когда
+ * сервер недоступен; основное значение приходит из листа Opens (markCardOpen).
+ */
+export const STORAGE_OPEN_TIME_PREFIX = `${STORAGE_PREFIX}card_open_`;
 
 export const STORAGE_VK_USER_KEY = `${STORAGE_PREFIX}vk_user`;
 
-export const STORAGE_NOTIF_REQUESTED = `${STORAGE_PREFIX}notif_requested`;
-
 export const STORAGE_OFFLINE_QUEUE = `${STORAGE_PREFIX}offline_answers`;
 
-export const STORAGE_FIRST_VISIT = `${STORAGE_PREFIX}first_visit`;
+/** Пользователь закрыл попап уведомлений («Не сейчас») — больше не показываем. */
+export const STORAGE_NOTIF_DISMISSED = `${STORAGE_PREFIX}notif_dismissed`;
 
 export const ADMIN_PASSWORD_HASH =
   process.env.NEXT_PUBLIC_ADMIN_PASSWORD_HASH || '';
@@ -60,6 +74,7 @@ export const API_ACTIONS = {
   GET_SERVER_TIME: 'getServerTime',
   SYNC_OFFLINE: 'syncOffline',
   SAVE_MANUAL_LOG: 'saveManualLog',
+  MARK_CARD_OPEN: 'markCardOpen',
 } as const;
 
 export type ApiAction = (typeof API_ACTIONS)[keyof typeof API_ACTIONS];

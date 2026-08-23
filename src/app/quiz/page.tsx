@@ -5,7 +5,12 @@
  * Карточка может быть добавлена в Sheets после деплоя: static export не требует
  * generateStaticParams и нового билда для каждого ID.
  *
- * Лог отправляется одним запросом вместе с ответом.
+ * Обновления (август 2026):
+ *  - Статус «уже отвечал» определяется только серверным списком
+ *    (userStore.answeredCardIds); локальные флаги _submitted удалены.
+ *  - После успешной отправки карточка сразу помечается отвеченной в сторе.
+ *  - На экране «Вы уже отвечали» добавлена кнопка «На главную».
+ *  - Лог отправляется одним запросом вместе с ответом.
  */
 
 'use client';
@@ -30,7 +35,7 @@ import { NotificationModal } from '@/components/quiz/NotificationModal';
 import { deltaSeconds, isReleased } from '@/utils/time';
 import { safeStringify } from '@/utils/json';
 import { getRaw, setRaw } from '@/utils/storage';
-import { STORAGE_OFFLINE_QUEUE, STORAGE_OPEN_TIME_PREFIX } from '@/constants';
+import { STORAGE_OFFLINE_QUEUE } from '@/constants';
 import type { AnswerPayload, AnswerRecord } from '@/types';
 
 function QuizContent() {
@@ -87,7 +92,6 @@ function QuizContent() {
         const queue = getRaw<AnswerRecord[]>(STORAGE_OFFLINE_QUEUE) || [];
         queue.push(answer);
         setRaw(STORAGE_OFFLINE_QUEUE, queue);
-        setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
 
         await logEvent('offline_save', { card_id: cardId });
         clearLogBuffer();
@@ -98,7 +102,8 @@ function QuizContent() {
 
       await sheetsApi.saveAnswer(answer);
       clearLogBuffer();
-      setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
+      // Карточка отвечена: сразу отражаем это в локальном списке с сервера.
+      useUserStore.getState().addAnsweredCardId(cardId);
       toast.success('Ответ отправлен!');
       router.push(`/thanks?card=${cardId}`);
     } catch (submitError) {
@@ -108,7 +113,6 @@ function QuizContent() {
 
       // Сервер отклонил повторный ответ: фиксируем статус и уводим на результат.
       if (message === 'ANSWER_DUPLICATE') {
-        setRaw(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`, { submitted: true });
         useUserStore.getState().addAnsweredCardId(cardId);
         clearLogBuffer();
         toast.success('Ответ уже принят ранее');
@@ -180,10 +184,8 @@ function QuizContent() {
     );
   }
 
-  // Уже отвечено (по серверному списку или локальному флагу) — форму не показываем.
-  const alreadyAnswered =
-    answeredCardIds.includes(cardId) ||
-    !!getRaw<{ submitted: boolean }>(`${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`)?.submitted;
+  // Уже отвечено — строго по серверному списку (обновляется и после отправки).
+  const alreadyAnswered = answeredCardIds.some((id) => String(id) === String(cardId));
 
   if (alreadyAnswered) {
     return (
@@ -193,9 +195,14 @@ function QuizContent() {
           Вы уже отвечали на эту карточку
         </h2>
         <p className="mb-5 text-slate-600">Повторные ответы не принимаются.</p>
-        <Link href={`/thanks?card=${cardId}`} className="btn-secondary">
-          Посмотреть результат
-        </Link>
+        <div className="flex flex-col gap-2">
+          <Link href="/" className="btn-primary">
+            На главную
+          </Link>
+          <Link href={`/thanks?card=${cardId}`} className="btn-secondary">
+            Посмотреть результат
+          </Link>
+        </div>
       </div>
     );
   }

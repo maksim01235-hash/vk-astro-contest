@@ -1,6 +1,14 @@
 /**
  * src/lib/hooks/useNotification.ts — запрос разрешения на уведомления.
  *
+ * Обновления (август 2026, сервер-как-источник-истины):
+ *  - Решение «показывать ли попап» принимается по флагу subscribed из листа
+ *    Users (userStore.userRecord), а не по локальным ключам first_visit /
+ *    notif_requested (удалены).
+ *  - Факт закрытия попапа («Не сейчас») и сбой запроса запоминаются локально
+ *    только как UI-предпочтение (STORAGE_NOTIF_DISMISSED), чтобы не донимать
+ *    пользователя.
+ *
  * Диагностика: подробности ошибки VK Bridge (error_type, error_data, message)
  * сохраняются в накопленный лог при неудачном VKWebAppAllowNotifications.
  */
@@ -12,7 +20,7 @@ import { requestNotifications } from '@/lib/vk/bridge';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
 import { useUserStore } from '@/lib/store/userStore';
-import { STORAGE_FIRST_VISIT, STORAGE_NOTIF_REQUESTED } from '@/constants';
+import { STORAGE_NOTIF_DISMISSED } from '@/constants';
 import { getRaw, setRaw } from '@/utils/storage';
 import { nowISO } from '@/utils/time';
 import type { UserRecord } from '@/types';
@@ -45,29 +53,25 @@ export function useNotification() {
   const [showPopup, setShowPopup] = useState(false);
   const [requesting, setRequesting] = useState(false);
 
+  /** Попап показываем, пока пользователь не подписан и не закрыл его раньше. */
   const checkShouldShow = useCallback(() => {
     if (!vkUser) return;
 
-    const firstVisit = getRaw<boolean>(STORAGE_FIRST_VISIT);
-    const requested = getRaw<boolean>(STORAGE_NOTIF_REQUESTED);
+    if (getRaw<boolean>(STORAGE_NOTIF_DISMISSED)) return;
+    if (userRecord?.subscribed) return;
 
-    if (!firstVisit) {
-      setRaw(STORAGE_FIRST_VISIT, true);
-    }
+    setShowPopup(true);
+  }, [vkUser, userRecord]);
 
-    if (!requested) {
-      setShowPopup(true);
-    }
-  }, [vkUser]);
-
+  /** Показать попап после отправки ответа (страница /thanks). */
   const showAfterSubmit = useCallback(() => {
     if (!vkUser) return;
 
-    const requested = getRaw<boolean>(STORAGE_NOTIF_REQUESTED);
-    if (!requested) {
-      setShowPopup(true);
-    }
-  }, [vkUser]);
+    if (getRaw<boolean>(STORAGE_NOTIF_DISMISSED)) return;
+    if (userRecord?.subscribed) return;
+
+    setShowPopup(true);
+  }, [vkUser, userRecord]);
 
   const request = useCallback(async () => {
     if (!vkUser || requesting) return false;
@@ -78,7 +82,6 @@ export function useNotification() {
     try {
       // При client_error requestNotifications бросит raw ошибку VK Bridge.
       await requestNotifications();
-      setRaw(STORAGE_NOTIF_REQUESTED, true);
 
       const timestamp = nowISO();
       const updatedUser: UserRecord = {
@@ -89,6 +92,7 @@ export function useNotification() {
         last_activity: timestamp,
       };
 
+      // Подписка — данные пользователя: живёт в таблице (лист Users).
       await sheetsApi.saveUser(updatedUser);
       setUserRecord(updatedUser);
       await logEvent('notification_granted', { vk_id: vkUser.id });
@@ -102,9 +106,8 @@ export function useNotification() {
         bridge_error: serializeBridgeError(error),
       });
 
-      // Пользователь уже сделал выбор/получил ошибку VK — повторно не показываем
-      // тот же попап до очистки localStorage.
-      setRaw(STORAGE_NOTIF_REQUESTED, true);
+      // Сбой запроса: больше не показываем попап в этой сессии/на этом устройстве.
+      setRaw(STORAGE_NOTIF_DISMISSED, true);
       setShowPopup(false);
       return false;
     } finally {
@@ -113,7 +116,8 @@ export function useNotification() {
   }, [requesting, setUserRecord, userRecord, vkUser]);
 
   const dismiss = useCallback(() => {
-    setRaw(STORAGE_NOTIF_REQUESTED, true);
+    // UI-предпочтение: пользователь уже видел попап и отказался.
+    setRaw(STORAGE_NOTIF_DISMISSED, true);
     setShowPopup(false);
   }, []);
 

@@ -1,11 +1,11 @@
 /**
  * lib/hooks/useRepost.ts — хук проверки и выполнения репоста.
  *
- * Логика:
- *  - Проверяет кеш localStorage (1 час TTL) — был ли репост.
- *  - Если нет кеша — вызывает checkRepost (через Apps Script / VK API).
- *  - Если репоста нет — возвращает hasRepost=false (UI покажет модалку).
- *  - После успешного репоста — кеширует на 1 час.
+ * Обновления (август 2026, сервер-как-источник-истины):
+ *  - Локальный кеш «репост сделан» (repost_<id>, TTL 1 час) удалён:
+ *    факт репоста живёт на сервере — проверка wall.getReposts выполняется
+ *    через Apps Script при каждом открытии карточки, итог пишется в
+ *    Answers.has_reposted при отправке ответа.
  */
 
 'use client';
@@ -13,17 +13,7 @@
 import { useState, useCallback } from 'react';
 import { checkRepost, addWallPost } from '@/lib/vk/bridge';
 import { logEvent } from '@/lib/sheets/logger';
-import {
-  REPOST_CACHE_TTL_MS,
-  STORAGE_REPOST_PREFIX,
-  MOCK_MODE,
-} from '@/constants';
-import { getWithTTL, setWithTTL } from '@/utils/storage';
-
-/** Ключ кеша репоста по карточке. */
-function repostKey(cardId: string): string {
-  return `${STORAGE_REPOST_PREFIX}${cardId}`;
-}
+import { MOCK_MODE } from '@/constants';
 
 export function useRepost(cardId: string, postId: string, vkId: string) {
   const [hasRepost, setHasRepost] = useState<boolean>(false);
@@ -31,23 +21,13 @@ export function useRepost(cardId: string, postId: string, vkId: string) {
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** Проверить статус репоста. */
+  /** Проверить статус репоста (серверная проверка через VK API). */
   const check = useCallback(async () => {
     setChecking(true);
     setError(null);
     try {
-      // Сначала кеш.
-      const cached = getWithTTL<boolean>(repostKey(cardId));
-      if (cached) {
-        setHasRepost(true);
-        return true;
-      }
-      // Реальная проверка.
       const reposted = await checkRepost(vkId, postId);
       setHasRepost(reposted);
-      if (reposted) {
-        setWithTTL(repostKey(cardId), true, REPOST_CACHE_TTL_MS);
-      }
       return reposted;
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Ошибка проверки репоста';
@@ -59,7 +39,7 @@ export function useRepost(cardId: string, postId: string, vkId: string) {
     }
   }, [cardId, postId, vkId]);
 
-  /** Сделать репост (VKWebAppAddWallPost). */
+  /** Сделать репост (VKWebAppShowWallPostBox). */
   const doRepost = useCallback(async () => {
     setPosting(true);
     setError(null);
@@ -67,7 +47,7 @@ export function useRepost(cardId: string, postId: string, vkId: string) {
     try {
       const ok = await addWallPost(postId);
       if (ok) {
-        setWithTTL(repostKey(cardId), true, REPOST_CACHE_TTL_MS);
+        // Флаг только в памяти сессии; серверная истина — Answers.has_reposted.
         setHasRepost(true);
         await logEvent('repost_success', { card_id: cardId });
         return true;

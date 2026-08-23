@@ -1,13 +1,14 @@
 /**
  * lib/hooks/useCard.ts — хук для работы с карточкой конкурса.
  *
- * Исправления (август 2026):
- *  - Исключены повторные getCard для одного cardId при прямом открытии карточки.
- *  - Убрана нестабильная зависимость loadCard от глобального cards store.
- *  - Добавлена защита от параллельного вызова и обновления состояния после размонтирования.
- *
- * Время открытия хранится только в localStorage и НЕ записывается в Logs.
- * Оно используется QuizClient для расчёта delta_seconds в Answers.
+ * Обновления (август 2026, сервер-как-источник-истины):
+ *  - Время первого открытия карточки приходит из таблицы (лист Opens,
+ *    действие markCardOpen) и фиксируется на сервере для пары vk_id + card_id.
+ *    Локальное значение в localStorage — только офлайн-fallback.
+ *  - Статус «completed» берётся из списка отвеченных (userStore, с сервера),
+ *    а не из локального флага _submitted — локальные флаги удалены.
+ *  - Исключены повторные getCard для одного cardId; защита от параллельных
+ *    вызовов и обновлений состояния после размонтирования сохранена.
  */
 
 'use client';
@@ -15,15 +16,17 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
+import { useUserStore } from '@/lib/store/userStore';
 import {
   STORAGE_CARDS_KEY,
+  MOCK_MODE,
   STORAGE_OPEN_TIME_PREFIX,
 } from '@/constants';
 import { getWithTTL, setRaw, getRaw } from '@/utils/storage';
 import type { CardRecord, CardWithStatus } from '@/types';
 
 function openTimeKey(cardId: string): string {
-  return `${STORAGE_OPEN_TIME_PREFIX}${cardId}_open`;
+  return `${STORAGE_OPEN_TIME_PREFIX}${cardId}`;
 }
 
 export function useCard(cardId: string) {
@@ -57,7 +60,7 @@ export function useCard(cardId: string) {
     setError(null);
 
     try {
-      // Сначала ищем карточку в localStorage-кеше списка.
+      // Сначала ищем карточку в localStorage-кеше списка (TTL 2 минуты).
       const cached = getWithTTL<CardRecord[]>(STORAGE_CARDS_KEY);
       const found = cached?.find((item) => String(item.card_id) === String(cardId)) || null;
 
@@ -80,11 +83,36 @@ export function useCard(cardId: string) {
     }
   }, [cardId]);
 
-  /** Фиксируем время только локально, без записи в Google Sheets. */
-  const fixOpenTime = useCallback(() => {
+  /**
+   * Время первого открытия карточки.
+   * Основной источник — таблица (Opens/markCardOpen): сервер фиксирует первое
+   * время и всегда возвращает его, поэтому у всех устройств пользователя и
+   * после переустановок дельта считается от одного и того же момента.
+   * Если сервер недоступен — локальный fallback в localStorage.
+   */
+  const resolveOpenTime = useCallback(async () => {
     if (!cardId) return;
 
     const key = openTimeKey(cardId);
+    const vkUser = useUserStore.getState().vkUser;
+
+    if (vkUser && !MOCK_MODE) {
+      try {
+        const iso = await sheetsApi.markCardOpen(vkUser.id, cardId);
+        if (iso) {
+          const serverMs = new Date(iso).getTime();
+          if (!Number.isNaN(serverMs)) {
+            // Обновляем локальный fallback свежим серверным значением.
+            setRaw(key, serverMs);
+            setOpenTime(serverMs);
+            return;
+          }
+        }
+      } catch {
+        // Сервер недоступен (нет сети/старый Apps Script) — падаем в fallback ниже.
+      }
+    }
+
     let stored = getRaw<number>(key);
     if (!stored) {
       stored = Date.now();
@@ -100,8 +128,8 @@ export function useCard(cardId: string) {
     setServerTime(null);
 
     void loadCard();
-    fixOpenTime();
-  }, [cardId, loadCard, fixOpenTime]);
+    void resolveOpenTime();
+  }, [cardId, loadCard, resolveOpenTime]);
 
   const getCardWithStatus = useCallback(async (): Promise<CardWithStatus | null> => {
     if (!card) return null;
@@ -121,13 +149,14 @@ export function useCard(cardId: string) {
       status = 'locked';
     }
 
-    const result = getRaw<{ submitted: boolean }>(
-      `${STORAGE_OPEN_TIME_PREFIX}${cardId}_submitted`,
-    );
-    if (result?.submitted) status = 'completed';
+    // «Выполнено» — только по серверному списку отвеченных.
+    const answered = useUserStore.getState().answeredCardIds;
+    if (answered.some((id) => String(id) === String(card.card_id))) {
+      status = 'completed';
+    }
 
     return { ...card, status };
-  }, [card, cardId, serverTime]);
+  }, [card, serverTime]);
 
   return {
     card,
