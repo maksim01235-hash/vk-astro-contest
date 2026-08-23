@@ -175,11 +175,10 @@ export type DnDState = Record<string, string[]>;
 export interface AnswerPayload {
   inputs: Record<string, string>;
   dnd: DnDState;
+  /** Сырые координаты метки (0–100). Проверку выполняет Apps Script. */
   marker?: {
     userX: number;
     userY: number;
-    actualErrorPercent: number;
-    isCorrect: boolean;
   };
 }
 

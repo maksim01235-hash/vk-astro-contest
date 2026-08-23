@@ -15,19 +15,20 @@ export interface MarkerPosition {
   y: number;
 }
 
+/** Окно в миллисекундах, когда после тапа можно начать перетаскивание метки. */
+const ARM_WINDOW_MS = 3000;
+
 interface Props {
   open: boolean;
   images: PhotoSwipeImage[];
   initialIndex?: number;
   onClose: () => void;
+  /** Позиция метки в процентах 0–100 относительно исходной картинки. Без неё метка не рендерится. */
   marker?: MarkerPosition;
   markerColor?: string;
   markerSizePercent?: number;
-  markerEditable?: boolean;
-  markerConfirmed?: boolean;
-  onMarkerActivate?: () => void;
+  /** Вызывается на каждое перемещение метки во время перетаскивания. */
   onMarkerChange?: (position: MarkerPosition) => void;
-  onMarkerConfirm?: () => void;
 }
 
 type Dimensions = Record<string, { width: number; height: number }>;
@@ -51,6 +52,8 @@ type PswpCore = {
       isButton?: boolean;
       tagName?: string;
       className?: string;
+      /** Куда монтировать элемент; по умолчанию — top-bar, 'root' — в корень .pswp. */
+      appendTo?: string;
       html?: string;
       onInit?: (el: HTMLElement, pswp: PswpCore) => void;
       onClick?: (event: MouseEvent, el: HTMLElement, pswp: PswpCore) => void;
@@ -81,23 +84,28 @@ export function PhotoSwipeViewer({
   marker,
   markerColor = '#3B82F6',
   markerSizePercent = 5,
-  markerEditable = false,
-  markerConfirmed = false,
-  onMarkerActivate,
   onMarkerChange,
-  onMarkerConfirm,
 }: Props) {
   const lightboxRef = useRef<PhotoSwipeLightbox | null>(null);
   const pswpRef = useRef<PswpCore | null>(null);
   const dimensionsRef = useRef<Dimensions>({});
   const markerRef = useRef(marker);
   const draggingRef = useRef(false);
-  const activeRef = useRef(false);
-  const confirmedRef = useRef(markerConfirmed);
+  const armedRef = useRef(false);
+  const armTimerRef = useRef<number | null>(null);
+  const syncRafRef = useRef<number | null>(null);
+  // После перетаскивания приходит click — подавляем его, чтобы не разармировать метку.
+  const suppressClickRef = useRef(false);
   const [ready, setReady] = useState(false);
 
+  // Свежие колбэки в рефах: пересоздание стрелок родителем (например, при
+  // обновлении состояния на каждый pointermove) не должно пересоздавать лайтбокс.
+  const onCloseRef = useRef(onClose);
+  const onMarkerChangeRef = useRef(onMarkerChange);
+
   markerRef.current = marker;
-  confirmedRef.current = markerConfirmed;
+  onCloseRef.current = onClose;
+  onMarkerChangeRef.current = onMarkerChange;
 
   /**
    * Рамка миникарты строится по фактической матрице трансформации:
@@ -166,7 +174,6 @@ export function PhotoSwipeViewer({
 
     const root = document.querySelector('.pswp');
     const dot = root?.querySelector<HTMLElement>('.contest-pswp__marker');
-    const confirm = root?.querySelector<HTMLElement>('.contest-pswp__marker-confirm');
     if (!dot) return;
 
     const slide = pswp.currSlide;
@@ -183,13 +190,42 @@ export function PhotoSwipeViewer({
     dot.style.height = `${size}px`;
     dot.style.backgroundColor = markerColor;
     dot.style.display = 'block';
-
-    if (confirm) {
-      confirm.style.left = `${markerX}px`;
-      confirm.style.top = `${Math.max(56, markerY - size / 2 - 38)}px`;
-      confirm.style.display = activeRef.current ? 'flex' : 'none';
-    }
   }, [markerColor, markerSizePercent]);
+
+  /** Визуальное состояние метки: классы активности и видимость подсказки. */
+  const applyMarkerVisual = useCallback(() => {
+    const root = document.querySelector('.pswp');
+    const dot = root?.querySelector<HTMLElement>('.contest-pswp__marker');
+    const hint = root?.querySelector<HTMLElement>('.contest-pswp__marker-hint');
+    const active = armedRef.current && !draggingRef.current;
+    dot?.classList.toggle('contest-pswp__marker--armed', active);
+    if (hint) hint.style.display = active ? 'block' : 'none';
+  }, []);
+
+  /**
+   * Разблокировать метку на ARM_WINDOW_MS: за это время нужно начать
+   * перетаскивание (защита от случайных одиночных касаний).
+   */
+  const armMarker = useCallback(() => {
+    armedRef.current = true;
+    if (armTimerRef.current !== null) window.clearTimeout(armTimerRef.current);
+    armTimerRef.current = window.setTimeout(() => {
+      armedRef.current = false;
+      armTimerRef.current = null;
+      applyMarkerVisual();
+    }, ARM_WINDOW_MS);
+    applyMarkerVisual();
+  }, [applyMarkerVisual]);
+
+  /** Зафиксировать метку: снять активность и отменить окно перемещения. */
+  const disarmMarker = useCallback(() => {
+    armedRef.current = false;
+    if (armTimerRef.current !== null) {
+      window.clearTimeout(armTimerRef.current);
+      armTimerRef.current = null;
+    }
+    applyMarkerVisual();
+  }, [applyMarkerVisual]);
 
   const moveMarkerFromPointer = useCallback((clientX: number, clientY: number) => {
     const pswp = pswpRef.current;
@@ -199,11 +235,21 @@ export function PhotoSwipeViewer({
     const zoom = slide.currZoomLevel || 1;
     const width = slide.data.width || 1;
     const height = slide.data.height || 1;
-    onMarkerChange?.({
+    const next = {
       x: clamp(((clientX - slide.pan.x) / (width * zoom)) * 100, 0, 100),
       y: clamp(((clientY - slide.pan.y) / (height * zoom)) * 100, 0, 100),
-    });
-  }, [onMarkerChange]);
+    };
+
+    // Экранная позиция известна точно — двигаем точку сразу,
+    // не дожидаясь перерендера родителя и следующего zoomPanUpdate.
+    const dot = document.querySelector<HTMLElement>('.contest-pswp__marker');
+    if (dot) {
+      dot.style.left = `${clientX}px`;
+      dot.style.top = `${clientY}px`;
+    }
+
+    onMarkerChangeRef.current?.(next);
+  }, []);
 
   useEffect(() => {
     if (!open || !images.length) return;
@@ -272,65 +318,94 @@ export function PhotoSwipeViewer({
         },
       });
 
-      if (marker) {
+      if (markerRef.current) {
         pswp.ui.registerElement({
           name: 'contest-marker',
           order: 4,
           tagName: 'div',
           className: 'contest-pswp__marker',
+          // Обязательно в корень: top-bar у нас прибит к низу экрана,
+          // абсолютные координаты метки должны считаться от viewport.
+          appendTo: 'root',
           onInit: (element) => {
+            // Первый тап — окно перемещения (защита от случайных касаний).
             element.addEventListener('click', (event) => {
               event.stopPropagation();
-              if (!markerEditable || confirmedRef.current) return;
-              activeRef.current = true;
-              onMarkerActivate?.();
-              syncMarker();
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
+              if (!markerRef.current || draggingRef.current) return;
+              armMarker();
             });
+            // Начало перетаскивания доступно только в активном окне.
             element.addEventListener('pointerdown', (event) => {
-              if (!activeRef.current || confirmedRef.current) return;
+              if (!armedRef.current || draggingRef.current) return;
               event.preventDefault();
               event.stopPropagation();
               draggingRef.current = true;
+              if (armTimerRef.current !== null) {
+                window.clearTimeout(armTimerRef.current);
+                armTimerRef.current = null;
+              }
               element.setPointerCapture?.(event.pointerId);
+              element.classList.add('contest-pswp__marker--dragging');
+              applyMarkerVisual();
             });
             element.addEventListener('pointermove', (event) => moveMarkerFromPointer(event.clientX, event.clientY));
-            element.addEventListener('pointerup', () => { draggingRef.current = false; });
+            // Отпускание пальца фиксирует позицию.
+            const endDrag = () => {
+              if (!draggingRef.current) return;
+              draggingRef.current = false;
+              suppressClickRef.current = true;
+              element.classList.remove('contest-pswp__marker--dragging');
+              disarmMarker();
+            };
+            element.addEventListener('pointerup', endDrag);
+            element.addEventListener('pointercancel', endDrag);
           },
         });
 
         pswp.ui.registerElement({
-          name: 'contest-marker-confirm',
+          name: 'contest-marker-hint',
           order: 5,
-          isButton: true,
-          tagName: 'button',
-          className: 'contest-pswp__marker-confirm',
-          html: '<svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>',
-          onClick: () => {
-            if (!activeRef.current) return;
-            draggingRef.current = false;
-            activeRef.current = false;
-            onMarkerConfirm?.();
-            syncMarker();
-          },
+          tagName: 'div',
+          className: 'contest-pswp__marker-hint',
+          appendTo: 'root',
+          html: 'Перетащите метку',
         });
       }
 
-      pswp.on('change', () => { activeRef.current = false; syncMinimap(); syncMarker(); });
-      pswp.on('zoomPanUpdate', () => {
-        requestAnimationFrame(() => {
-          syncMinimap();
-          syncMarker();
-        });
-      });
-      pswp.on('resize', () => { requestAnimationFrame(() => { syncMinimap(); syncMarker(); }); });
-      requestAnimationFrame(() => { syncMinimap(); syncMarker(); });
+      pswp.on('change', () => { disarmMarker(); draggingRef.current = false; });
+
+      /**
+       * Непрерывная синхронизация, пока просмотр открыт: покрывает зум колесом,
+       * жесты, ресайз и позднюю загрузку натуральных размеров картинки.
+       * Во время активного перетаскивания позицию точки ведёт палец напрямую —
+       * пропускаем syncMarker, чтобы не было джиттера из-за лага состояния.
+       */
+      applyMarkerVisual();
+      const tick = () => {
+        syncMinimap();
+        if (!draggingRef.current) syncMarker();
+        syncRafRef.current = requestAnimationFrame(tick);
+      };
+      syncRafRef.current = requestAnimationFrame(tick);
     });
 
+    const stopSyncLoop = () => {
+      if (syncRafRef.current !== null) {
+        cancelAnimationFrame(syncRafRef.current);
+        syncRafRef.current = null;
+      }
+    };
+
     lightbox.on('destroy', () => {
+      stopSyncLoop();
       pswpRef.current = null;
       lightboxRef.current = null;
       setReady(false);
-      onClose();
+      onCloseRef.current();
     });
 
     lightbox.init();
@@ -338,11 +413,14 @@ export function PhotoSwipeViewer({
     lightbox.loadAndOpen(Math.max(0, Math.min(initialIndex, images.length - 1)));
 
     return () => {
+      stopSyncLoop();
       lightbox.destroy();
       lightboxRef.current = null;
       pswpRef.current = null;
+      draggingRef.current = false;
+      disarmMarker();
     };
-  }, [images, initialIndex, marker, markerEditable, moveMarkerFromPointer, onClose, onMarkerActivate, onMarkerConfirm, open, ready, syncMarker, syncMinimap]);
+  }, [applyMarkerVisual, armMarker, disarmMarker, images, initialIndex, moveMarkerFromPointer, open, ready, syncMarker, syncMinimap]);
 
   useEffect(() => {
     if (!open && lightboxRef.current) lightboxRef.current.destroy();
@@ -357,7 +435,7 @@ export function PhotoSwipeViewerStyles() {
       .pswp .pswp__top-bar { position:fixed !important; top:auto !important; right:0 !important; bottom:calc(16px + env(safe-area-inset-bottom, 0px)) !important; left:0 !important; width:100% !important; height:auto !important; min-height:0 !important; padding:0 !important; background:transparent !important; pointer-events:none; z-index:10000; }
       .pswp .pswp__top-bar > * { pointer-events:auto; }
       .pswp .pswp__button--close, .pswp .pswp__button--zoom, .pswp .pswp__button--arrow--prev, .pswp .pswp__button--arrow--next, .pswp .pswp__counter { display:none !important; }
-      .pswp .contest-pswp__close, .pswp .contest-pswp__marker-confirm, .pswp .contest-pswp__zoom button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:0; color:#fff; background:rgba(7,12,20,.78); box-shadow:0 4px 18px rgba(0,0,0,.38); cursor:pointer; }
+      .pswp .contest-pswp__close, .pswp .contest-pswp__zoom button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; border:0; color:#fff; background:rgba(7,12,20,.78); box-shadow:0 4px 18px rgba(0,0,0,.38); cursor:pointer; }
       .pswp .contest-pswp__close { position:fixed; top:calc(16px + env(safe-area-inset-top, 0px)); left:calc(16px + env(safe-area-inset-left, 0px)); width:56px; height:56px; border-radius:50%; z-index:10010; }
       .pswp .contest-pswp__close svg { width:30px; height:30px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; }
       .pswp .contest-pswp__minimap { position:fixed; left:calc(16px + env(safe-area-inset-left, 0px)); bottom:calc(16px + env(safe-area-inset-bottom, 0px)); width:min(30vw,300px); aspect-ratio:1; overflow:hidden; border:2px solid rgba(255,255,255,.88); border-radius:9px; background:#0b0f16; box-shadow:0 4px 18px rgba(0,0,0,.48); z-index:10010; }
@@ -366,8 +444,10 @@ export function PhotoSwipeViewerStyles() {
       .pswp .contest-pswp__zoom { position:fixed; display:flex; flex-direction:column; gap:10px; right:calc(16px + env(safe-area-inset-right, 0px)); bottom:calc(16px + env(safe-area-inset-bottom, 0px)); z-index:10010; }
       .pswp .contest-pswp__zoom button { width:52px; height:52px; border-radius:50%; font-size:34px; font-weight:300; line-height:1; }
       .pswp .contest-pswp__marker { position:absolute; display:none; box-sizing:border-box; border:3px solid #fff; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 0 3px rgba(0,0,0,.34),0 4px 14px rgba(0,0,0,.45); cursor:pointer; touch-action:none; z-index:10011; }
-      .pswp .contest-pswp__marker-confirm { position:absolute; display:none; width:42px; height:42px; border-radius:50%; transform:translate(-50%,-100%); background:#16a34a; z-index:10012; }
-      .pswp .contest-pswp__marker-confirm svg { width:25px; height:25px; fill:none; stroke:currentColor; stroke-width:2.8; stroke-linecap:round; stroke-linejoin:round; }
+      .pswp .contest-pswp__marker--armed { animation: contest-marker-pulse 1s ease-in-out infinite; }
+      .pswp .contest-pswp__marker--dragging { animation:none; }
+      @keyframes contest-marker-pulse { 0%,100% { box-shadow:0 0 0 3px rgba(59,130,246,.65),0 4px 14px rgba(0,0,0,.45); } 50% { box-shadow:0 0 0 14px rgba(59,130,246,0),0 4px 14px rgba(0,0,0,.45); } }
+      .pswp .contest-pswp__marker-hint { display:none; position:fixed; top:calc(20px + env(safe-area-inset-top, 0px)); left:50%; transform:translateX(-50%); padding:8px 16px; border-radius:999px; background:rgba(7,12,20,.78); color:#fff; font-size:13px; white-space:nowrap; pointer-events:none; z-index:10012; }
       @media (max-width:640px) { .pswp .contest-pswp__close { top:calc(12px + env(safe-area-inset-top, 0px)); left:calc(12px + env(safe-area-inset-left, 0px)); width:50px; height:50px; } .pswp .contest-pswp__minimap { left:calc(12px + env(safe-area-inset-left, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); width:min(30vw,180px); } .pswp .contest-pswp__zoom { right:calc(12px + env(safe-area-inset-right, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); } .pswp .contest-pswp__zoom button { width:46px; height:46px; font-size:30px; } }
     `}</style>
   );

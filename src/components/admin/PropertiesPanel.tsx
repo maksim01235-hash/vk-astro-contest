@@ -229,10 +229,13 @@ export function PropertiesPanel({ block, blocks, blockIndex, onChangeFor }: Prop
         <Input label="Alt-текст" value={block.alt || ''} onChange={(e) => updateBlock('alt', e.target.value)} placeholder="Описание" />
         <Input label="Макс. ширина (px)" type="number" value={block.maxImageWidth || ''} onChange={(e) => updateBlock('maxImageWidth', e.target.value ? parseInt(e.target.value, 10) : undefined)} />
         <Input label="Макс. высота (px)" type="number" value={block.maxImageHeight || ''} onChange={(e) => updateBlock('maxImageHeight', e.target.value ? parseInt(e.target.value, 10) : undefined)} />
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={block.viewer !== false} onChange={(e) => updateBlock('viewer', e.target.checked)} />
-          Показывать полноэкранный просмотр
-        </label>
+        <div className="flex flex-col gap-1">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={block.viewer !== false} onChange={(e) => updateBlock('viewer', e.target.checked)} />
+            Показывать полноэкранный просмотр
+          </label>
+          <p className="text-xs leading-relaxed text-slate-500">Для маркера нужен включённый просмотр: пользователь перемещает метку именно в полноэкранном режиме.</p>
+        </div>
 
         <div className="mt-2 border-t border-slate-200 pt-3">
           <h4 className="mb-2 text-xs font-semibold text-slate-600">Настройки правильного ответа</h4>
