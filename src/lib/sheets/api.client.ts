@@ -222,6 +222,22 @@ export const sheetsApi = {
     });
   },
 
+  /**
+   * Зафиксировать факт открытия карточки и получить время первого просмотра.
+   * Сервер (лист Opens) под лока́том записывает первое время для пары
+   * vk_id + card_id и возвращает его; повторные вызовы отдают то же значение.
+   * @returns ISO-строка времени первого открытия либо '' при сбое.
+   */
+  markCardOpen(vkId: string, cardId: string): Promise<string> {
+    return gate(`${API_ACTIONS.MARK_CARD_OPEN}:${vkId}:${cardId}`, 'coalesce', async () => {
+      const data = await get<{ iso: string }>(API_ACTIONS.MARK_CARD_OPEN, {
+        vk_id: vkId,
+        card_id: cardId,
+      });
+      return data?.iso || '';
+    });
+  },
+
   syncOffline(answers: AnswerRecord[]): Promise<{ saved: number; skipped: number }> {
     return gate(API_ACTIONS.SYNC_OFFLINE, 'single', async () => {
       const data = await post<{ saved: number; skipped: number }>(API_ACTIONS.SYNC_OFFLINE, { answers });

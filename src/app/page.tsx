@@ -1,6 +1,15 @@
+/**
+ * src/app/page.tsx — главная: список карточек конкурса.
+ *
+ * Обновления (август 2026, сервер-как-источник-истины):
+ *  - Статус «Выполнено» определяется только серверным списком отвеченных
+ *    карточек (userStore.answeredCardIds); локальные флаги _submitted удалены.
+ *  - Кеш списка в localStorage сокращён до 2 минут (константа CARDS_CACHE_TTL_MS).
+ */
+
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useUserStore } from '@/lib/store/userStore';
@@ -8,16 +17,21 @@ import { useCardsStore } from '@/lib/store/cardsStore';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
 import { Button } from '@/components/ui/Button';
-import { CARDS_CACHE_TTL_MS, STORAGE_CARDS_KEY, STORAGE_OPEN_TIME_PREFIX } from '@/constants';
-import { getWithTTL, setWithTTL, getRaw } from '@/utils/storage';
+import { CARDS_CACHE_TTL_MS, STORAGE_CARDS_KEY } from '@/constants';
+import { getWithTTL, setWithTTL } from '@/utils/storage';
 import { isReleased, formatDate } from '@/utils/time';
-import type { CardRecord, CardWithStatus } from '@/types';
+import type { CardRecord } from '@/types';
 
 export default function HomePage() {
   const { isAuthed, loading: authLoading, login } = useAuth();
   const answeredCardIds = useUserStore((state) => state.answeredCardIds);
   const { cards, setCards, loading, setLoading, error, setError } = useCardsStore();
-  const [submittedCards, setSubmittedCards] = useState<Set<string>>(new Set());
+
+  /** Карточки, на которые пользователь уже ответил — только с сервера. */
+  const submittedCards = useMemo(
+    () => new Set(answeredCardIds.map(String)),
+    [answeredCardIds],
+  );
 
   const loadCards = async () => {
     setLoading(true);
@@ -45,19 +59,8 @@ export default function HomePage() {
     if (isAuthed) void loadCards();
   }, [isAuthed]);
 
-  useEffect(() => {
-    // «Выполнено» — по серверному списку отвеченных И локальному флагу
-    // (локальный закрывает случай, когда серверный список ещё не подгрузился).
-    const submitted = new Set<string>(answeredCardIds);
-    for (const card of cards) {
-      const result = getRaw<{ submitted: boolean }>(`${STORAGE_OPEN_TIME_PREFIX}${card.card_id}_submitted`);
-      if (result?.submitted) submitted.add(card.card_id);
-    }
-    setSubmittedCards(submitted);
-  }, [cards, answeredCardIds]);
-
-  const getStatus = (card: CardRecord): CardWithStatus['status'] => {
-    if (submittedCards.has(card.card_id)) return 'completed';
+  const getStatus = (card: CardRecord): 'locked' | 'available' | 'completed' => {
+    if (submittedCards.has(String(card.card_id))) return 'completed';
     if (!isReleased(card.release_datetime)) return 'locked';
     return 'available';
   };

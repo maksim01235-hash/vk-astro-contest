@@ -1,14 +1,69 @@
 /**
  * utils/storage.ts — обёртка над localStorage с поддержкой TTL.
- * Используется для кеширования карточек, статуса репоста, времени открытия.
+ * Используется для кеширования карточек и офлайн-fallback времени открытия.
  *
  * Зачем: localStorage сам по себе не поддерживает TTL (время жизни кеша).
  * Эта обёртка хранит { value, expiresAt } и автоматически удаляет протухшие записи.
+ *
+ * Плюс одноразовая миграция: ключи прошлых версий хранилища удаляются,
+ * а критичные данные (автовход, офлайн-очередь, админ-флаг) переносятся
+ * в актуальный префикс, чтобы пользователь не терял их при обновлении.
  */
+
+import { LEGACY_STORAGE_PREFIX, STORAGE_PREFIX } from '@/constants';
 
 interface CacheEntry<T> {
   value: T;
   expiresAt: number; // timestamp (мс), когда кеш протухнет
+}
+
+/**
+ * Суффиксы legacy-ключей, которые переносим в новую версию хранилища.
+ * Всё остальное со старым префиксом безвозвратно удаляется:
+ * это кеши (_open/_submitted/repost/cards_cache) и флаги уведомлений,
+ * чьи источники истины теперь в Google Sheets.
+ */
+const MIGRATED_KEY_SUFFIXES = ['vk_user', 'admin_authed', 'offline_answers'];
+
+/**
+ * Одноразовая миграция хранилища: удалить устаревшие ключи прошлых версий,
+ * перенеся заранее определённый минимум в актуальный префикс.
+ * Вызывается один раз при старте приложения (см. Providers.tsx).
+ */
+export function migrateLegacyStorage(): void {
+  try {
+    const staleKeys: string[] = [];
+
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (
+        key.startsWith(LEGACY_STORAGE_PREFIX) &&
+        !key.startsWith(STORAGE_PREFIX)
+      ) {
+        staleKeys.push(key);
+      }
+    }
+
+    staleKeys.forEach((key) => {
+      const suffix = key.slice(LEGACY_STORAGE_PREFIX.length);
+      const targetKey = `${STORAGE_PREFIX}${suffix}`;
+
+      if (
+        MIGRATED_KEY_SUFFIXES.includes(suffix) &&
+        localStorage.getItem(targetKey) === null
+      ) {
+        const raw = localStorage.getItem(key);
+        if (raw !== null) {
+          localStorage.setItem(targetKey, raw);
+        }
+      }
+
+      localStorage.removeItem(key);
+    });
+  } catch (e) {
+    console.warn('[storage] migrateLegacyStorage failed:', e);
+  }
 }
 
 /**

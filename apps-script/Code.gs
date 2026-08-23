@@ -1,17 +1,19 @@
 /**
  * apps-script/Code.gs — Google Apps Script backend for VK Contest.
  *
- * Версия: август 2026 (добавлена поддержка ImageMarkerBlock).
+ * Версия: август 2026 (сервер-как-источник-истины).
  *
  * Обновления:
+ *  - Новый лист Opens + действие markCardOpen: время первого просмотра
+ *    карточки хранится на сервере (пара vk_id + card_id, под лока́том).
+ *  - writeLog: запись по колонкам согласно заголовкам листа Logs
+ *    (раньше данные писались со сдвигом в 3 колонки из 7).
  *  - writeLog: атомарный appendRow + LockService — без потери строк
  *    при параллельных запросах (формат Logs прежний: 3 колонки).
  *  - checkInputsAnswer/checkDndAnswer: серверная проверка числовых ответов
  *    (процентный допуск) и раскладки DnD по эталонным объектам зоны.
  *  - normalizeUserAnswer: единый формат ответа { inputs, dnd } без схлопывания.
  *  - checkMarkerAnswer: проверка координат метки.
- *  - normalizeUserAnswer: поддержка поля marker.
- *  - saveAnswer: вычисление actualErrorPercent и isCorrect для маркера.
  */
 
 var SHEET_USERS = 'Users';
@@ -19,6 +21,7 @@ var SHEET_CARDS = 'Cards';
 var SHEET_ANSWERS = 'Answers';
 var SHEET_LOGS = 'Logs';
 var SHEET_FEEDBACK = 'Feedback';
+var SHEET_OPENS = 'Opens';
 
 var HEADERS = {
   Users: ['vk_id', 'name', 'reg_date', 'subscribed', 'last_activity'],
@@ -26,6 +29,7 @@ var HEADERS = {
   Answers: ['id', 'vk_id', 'card_id', 'open_timestamp', 'submit_timestamp', 'delta_seconds', 'user_answer', 'has_reposted'],
   Logs: ['id', 'timestamp', 'vk_id', 'event_type', 'event_data', 'page_url', 'user_agent'],
   Feedback: ['id', 'timestamp', 'vk_id', 'name', 'card_id', 'message'],
+  Opens: ['vk_id', 'card_id', 'first_open_timestamp'],
 };
 
 var CARDS_CACHE_TTL_SEC = 300;
@@ -49,6 +53,7 @@ function doGet(e) {
       case 'getStats': result = getStats(); break;
       case 'checkRepost': result = checkRepostViaVK(e.parameter.vk_id, e.parameter.post_id); break;
       case 'getServerTime': result = { iso: new Date().toISOString() }; break;
+      case 'markCardOpen': result = markCardOpen(e.parameter.vk_id, e.parameter.card_id); break;
       default: return jsonOut({ ok: false, error: 'Unknown action: ' + action });
     }
 
@@ -272,6 +277,51 @@ function saveCard(card) {
 
     invalidateCardCache(card.card_id);
     return { saved: true, created: !exists };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ============================================================
+// Opens (время первого просмотра карточки)
+// ============================================================
+
+/**
+ * Фиксирует факт открытия карточки и возвращает время первого просмотра.
+ *
+ * Для пары vk_id + card_id время записывается ОДИН раз (под лока́том,
+ * чтобы параллельные запросы не создали дубли). Все последующие вызовы —
+ * с любого устройства и после любой перезагрузки — возвращают то же время,
+ * поэтому delta_seconds у пользователя всегда считается от одного момента.
+ *
+ * @param {string} vkId
+ * @param {string} cardId
+ * @returns {Object} { iso: string } — ISO-время первого просмотра
+ */
+function markCardOpen(vkId, cardId) {
+  if (!vkId) throw new Error('vk_id is required');
+  if (!cardId) throw new Error('card_id is required');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var rows = readSheet(SHEET_OPENS);
+    for (var i = 0; i < rows.length; i++) {
+      if (
+        String(rows[i].vk_id) === String(vkId) &&
+        String(rows[i].card_id) === String(cardId)
+      ) {
+        return { iso: rows[i].first_open_timestamp };
+      }
+    }
+
+    var iso = new Date().toISOString();
+    appendRow(SHEET_OPENS, {
+      vk_id: vkId,
+      card_id: cardId,
+      first_open_timestamp: iso,
+    });
+    return { iso: iso };
   } finally {
     lock.releaseLock();
   }
@@ -664,7 +714,49 @@ function getAnsweredCards(vkId) {
   return Object.keys(answered);
 }
 
+/**
+ * Записывает события в лист Logs по колонкам согласно HEADERS.Logs:
+ * id | timestamp | vk_id | event_type | event_data | page_url | user_agent.
+ *
+ * Раньше вся пачка писалась одной строкой в 3 колонки — данные были сдвинуты
+ * относительно заголовков. Теперь каждая строка соответствует одному событию;
+ * старые строки остаются как архив.
+ *
+ * @param {string} vkId - владелец лога ('admin' для ручной отправки из админки)
+ * @param {Array<Object>} events - события буфера { timestamp, event_type, event_data, ... }
+ */
 function writeLog(vkId, events) {
+  var sheet = getSheet(SHEET_LOGS);
+  var headers = HEADERS.Logs;
+
+  var rows = events.map(function(event) {
+    return headers.map(function(header) {
+      switch (header) {
+        case 'timestamp':
+          return event.timestamp || new Date().toISOString();
+        case 'vk_id':
+          return vkId || event.vk_id || 'anonymous';
+        case 'event_type':
+          return event.event_type || '';
+        case 'event_data':
+          return typeof event.event_data === 'string'
+            ? event.event_data
+            : JSON.stringify(event.event_data !== undefined ? event.event_data : {});
+        case 'page_url':
+          return event.page_url || '';
+        case 'user_agent':
+          return event.user_agent || '';
+        default:
+          // id не используется: строки Logs идентифицируются по времени+vk_id.
+          return '';
+      }
+    });
+  });
+
+  if (rows.length > 0) {
+    sheet
+      .getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length)
+      .setValues(rows);
   // Сериализуем записи в Logs: параллельные запросы без лока вычисляли бы
   // одну и ту же «следующую строку» и затирали друг друга.
   var lock = LockService.getScriptLock();

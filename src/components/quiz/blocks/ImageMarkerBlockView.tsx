@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ImageMarkerBlock } from '@/types';
 import {
   PhotoSwipeViewer,
@@ -25,6 +25,9 @@ import { logEvent } from '@/lib/sheets/logger';
 import { getRaw } from '@/utils/storage';
 import { STORAGE_ADMIN_AUTH } from '@/constants';
 import clsx from 'clsx';
+
+/** Минимальный интервал между событиями marker_move в логе (мс). */
+const MARKER_LOG_INTERVAL_MS = 1000;
 
 interface Props {
   block: ImageMarkerBlock;
@@ -49,12 +52,60 @@ export function ImageMarkerBlockView({ block, position, onPositionChange }: Prop
     [block.alt, block.id, block.src],
   );
 
+  /**
+   * Троттлинг лога marker_move: во время перетаскивания позиция обновляется
+   * каждые ~10 мс, и без ограничений один жест добавлял в буфер ~100 событий.
+   * Это раздувало payload saveAnswer и приводило к таймаутам на слабой сети.
+   * Логируем первое движение, далее не чаще раза в секунду; последняя позиция
+   * гарантированно досылается отложенным вызовом (в т.ч. при размонтировании).
+   */
+  const lastLoggedAtRef = useRef(0);
+  const pendingTimerRef = useRef<number | null>(null);
+  const pendingPosRef = useRef<MarkerPosition | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pendingTimerRef.current !== null) {
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
+      }
+      const pos = pendingPosRef.current;
+      pendingPosRef.current = null;
+      if (pos) {
+        void logEvent('marker_move', {
+          x: Math.round(pos.x * 10) / 10,
+          y: Math.round(pos.y * 10) / 10,
+        });
+      }
+    };
+  }, []);
+
   const handleMarkerChange = useCallback(
     (next: MarkerPosition) => {
-      void logEvent('marker_move', {
-        x: Math.round(next.x * 10) / 10,
-        y: Math.round(next.y * 10) / 10,
-      });
+      pendingPosRef.current = next;
+
+      const flushPending = () => {
+        pendingTimerRef.current = null;
+        const pos = pendingPosRef.current;
+        pendingPosRef.current = null;
+        if (!pos) return;
+        lastLoggedAtRef.current = Date.now();
+        void logEvent('marker_move', {
+          x: Math.round(pos.x * 10) / 10,
+          y: Math.round(pos.y * 10) / 10,
+        });
+      };
+
+      const elapsed = Date.now() - lastLoggedAtRef.current;
+      if (elapsed >= MARKER_LOG_INTERVAL_MS && pendingTimerRef.current === null) {
+        flushPending();
+      } else if (pendingTimerRef.current === null) {
+        pendingTimerRef.current = window.setTimeout(
+          flushPending,
+          MARKER_LOG_INTERVAL_MS - elapsed,
+        );
+      }
+
       onPositionChange(next);
     },
     [onPositionChange],
