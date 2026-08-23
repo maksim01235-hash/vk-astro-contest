@@ -4,7 +4,7 @@
 
 'use client';
 
-import { ButtonBlock as ButtonBlockType } from '@/types';
+import type { ButtonBlock as ButtonBlockType } from '@/types';
 import { Button as UIButton } from '@/components/ui/Button';
 
 interface Props {

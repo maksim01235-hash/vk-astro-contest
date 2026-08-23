@@ -5,7 +5,7 @@
  *  - output: 'export' — генерирует статический сайт в папке `out/`.
  *  - images.unoptimized: true — на GitHub Pages нет серверной оптимизации картинок.
  *  - basePath — путь репозитория на GitHub Pages вида `/<repo-name>`.
- *    Например, для https://username.github.io/vk-contest-mini-app/ basePath = '/vk-contest-mini-app'.
+ *    Например, для https://username.github.io/vk-astro-contest/ basePath = '/vk-astro-contest'.
  *    Для пользовательского домена или корня — basePath = ''.
  *  - trailingSlash: true — GitHub Pages корректно отдаёт папки с index.html.
  *
@@ -29,8 +29,8 @@ const nextConfig = {
 
   // basePath = путь репозитория на GitHub Pages.
   // Меняйте под свой репозиторий. Для корневого домена — пустая строка.
-  // Читается из env NEXT_PUBLIC_BASE_PATH, по умолчанию '/vk-contest-mini-app'.
-  basePath: process.env.NEXT_PUBLIC_BASE_PATH || '/vk-contest-mini-app',
+  // Читается из env NEXT_PUBLIC_BASE_PATH, по умолчанию '/vk-astro-contest'.
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || '/vk-astro-contest',
 
   // Добавляет слэш в конце URL — нужно для корректной работы на GitHub Pages.
   trailingSlash: true,

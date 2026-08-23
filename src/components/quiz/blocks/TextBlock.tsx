@@ -6,7 +6,7 @@
 
 'use client';
 
-import { TextBlock as TextBlockType } from '@/types';
+import type { TextBlock as TextBlockType } from '@/types';
 
 interface Props {
   block: TextBlockType;

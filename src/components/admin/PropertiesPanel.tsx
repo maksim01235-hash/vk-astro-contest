@@ -5,21 +5,64 @@
  *  - ImageBlock: поддержка images[], layoutMode, gridColumns.
  *  - ImageMarkerBlock: новый тип блока + превью метки.
  *  - Исправлена типизация обновления свойств union-типа Block.
+ *  - Редактируемые идентификаторы (id, answerKey, zoneId, objectId)
+ *    с проверкой уникальности в своей области.
  */
 
 'use client';
 
-import type { Block, ImageBlock, ImageItem, ImageMarkerBlock as ImageMarkerBlockType } from '@/types';
+import { useState } from 'react';
+import type { Block, BlockType, ImageBlock, ImageItem, ImageMarkerBlock as ImageMarkerBlockType } from '@/types';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import clsx from 'clsx';
 
-interface Props {
-  block: Block | null;
-  onChange: (block: Block) => void;
+/**
+ * Поле ввода списка идентификаторов через запятую (correctObjectIds, allowedZones).
+ *
+ * Проблема: если показывать value из схемы (массив → join), введённый разделитель
+ * мгновенно «съедается» нормализацией — split + filter(Boolean) отбрасывает пустой
+ * элемент после запятой, и join возвращает строку без неё.
+ *
+ * Решение: во время ввода показываем локальный черновик строки (draft),
+ * а в схему сразу пишем распарсенный массив; на blur черновик сбрасывается,
+ * и поле показывает каноническое значение из схемы.
+ * При смене выбранного блока состояние сбрасывается через key на месте использования.
+ */
+function IdListField({ label, value, onChange, placeholder }: {
+  label: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const parse = (raw: string) => raw.split(',').map((item) => item.trim()).filter(Boolean);
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value.join(', ');
+
+  return (
+    <Input
+      label={label}
+      value={shown}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(parse(e.target.value));
+      }}
+      onBlur={() => setDraft(null)}
+      placeholder={placeholder}
+    />
+  );
 }
 
-export function PropertiesPanel({ block, onChange }: Props) {
+interface Props {
+  block: Block | null;
+  blocks: Block[];
+  /** Индекс редактируемого блока в blocks — чтобы при проверке дублей не сравнивать блок с самим собой. */
+  blockIndex: number;
+  /** Замена блока по его текущему id — контракт устойчив к переименованию идентификатора. */
+  onChangeFor: (blockId: string, nextBlock: Block) => void;
+}
+
+export function PropertiesPanel({ block, blocks, blockIndex, onChangeFor }: Props) {
   if (!block) {
     return (
       <div className="card-surface p-4 text-center text-slate-500">
@@ -29,12 +72,47 @@ export function PropertiesPanel({ block, onChange }: Props) {
   }
 
   const updateBlock = (key: string, value: unknown) => {
-    onChange({ ...block, [key]: value } as Block);
+    onChangeFor(block.id, { ...block, [key]: value } as Block);
   };
+
+  /**
+   * Валидация идентификатора: непустой и не занят другим блоком своей области.
+   * Области: id — все блоки; answerKey — InputField; zoneId — DragZone; objectId — DragObject.
+   * Ссылки между блоками (allowedZones / correctObjectIds) при переименовании
+   * НЕ обновляются автоматически — админ правит их вручную.
+   */
+  const validateIdentifier = (
+    candidate: string,
+    getField: (item: Block) => string,
+    scopeTypes?: BlockType[],
+  ): string | undefined => {
+    if (!candidate.trim()) return 'Не может быть пустым';
+    const taken = blocks.some(
+      (item, index) =>
+        index !== blockIndex &&
+        (!scopeTypes || scopeTypes.includes(item.type)) &&
+        getField(item) === candidate,
+    );
+    return taken ? 'Такой идентификатор уже используется' : undefined;
+  };
+
+  const idProblem = validateIdentifier(block.id, (item) => item.id);
+  const answerKeyProblem = block.type === 'InputField'
+    ? validateIdentifier(block.answerKey, (item) => (item.type === 'InputField' ? item.answerKey : ''), ['InputField'])
+    : undefined;
+  const zoneIdProblem = block.type === 'DragZone'
+    ? validateIdentifier(block.zoneId, (item) => (item.type === 'DragZone' ? item.zoneId : ''), ['DragZone'])
+    : undefined;
+  const objectIdProblem = block.type === 'DragObject'
+    ? validateIdentifier(block.objectId, (item) => (item.type === 'DragObject' ? item.objectId : ''), ['DragObject'])
+    : undefined;
 
   const renderCommonFields = () => (
     <>
-      <Input label="ID блока" value={block.id} onChange={(e) => updateBlock('id', e.target.value)} disabled />
+      <div className="flex flex-col gap-1">
+        <Input label="ID блока" value={block.id} onChange={(e) => updateBlock('id', e.target.value)} error={idProblem} placeholder="Уникальный среди всех блоков" />
+        <p className="text-xs leading-relaxed text-slate-500">Уникален среди всех блоков карточки.</p>
+      </div>
       <Input label="Порядок" type="number" value={block.order} onChange={(e) => updateBlock('order', parseInt(e.target.value, 10) || 0)} />
     </>
   );
@@ -42,17 +120,17 @@ export function PropertiesPanel({ block, onChange }: Props) {
   const addImage = () => {
     if (block.type !== 'ImageBlock') return;
     const newImage: ImageItem = { id: `${block.id}-${Date.now()}`, src: '', alt: '' };
-    onChange({ ...block, images: [...(block.images || []), newImage] });
+    onChangeFor(block.id, { ...block, images: [...(block.images || []), newImage] });
   };
 
   const removeImage = (index: number) => {
     if (block.type !== 'ImageBlock') return;
-    onChange({ ...block, images: (block.images || []).filter((_, i) => i !== index) });
+    onChangeFor(block.id, { ...block, images: (block.images || []).filter((_, i) => i !== index) });
   };
 
   const updateImage = (index: number, key: keyof ImageItem, value: string) => {
     if (block.type !== 'ImageBlock') return;
-    onChange({
+    onChangeFor(block.id, {
       ...block,
       images: (block.images || []).map((image, i) => i === index ? { ...image, [key]: value } : image),
     });
@@ -98,7 +176,7 @@ export function PropertiesPanel({ block, onChange }: Props) {
                 size="sm"
                 onClick={() => {
                   const first = block.images?.[0] || { src: '', alt: '' };
-                  onChange({ ...block, src: first.src, alt: first.alt, images: undefined });
+                  onChangeFor(block.id, { ...block, src: first.src, alt: first.alt, images: undefined });
                 }}
               >
                 Переключить на одно изображение
@@ -113,7 +191,7 @@ export function PropertiesPanel({ block, onChange }: Props) {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  onChange({
+                  onChangeFor(block.id, {
                     ...block,
                     images: [{ id: `${block.id}-legacy`, src: block.src || '', alt: block.alt || '' }],
                     src: undefined,
@@ -191,7 +269,7 @@ export function PropertiesPanel({ block, onChange }: Props) {
   }
 
   if (block.type === 'InputField') {
-    return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">InputField</h3>{renderCommonFields()}<Input label="Текст" value={block.label} onChange={(e) => updateBlock('label', e.target.value)} placeholder="Введите ответ" /><Input label="Placeholder" value={block.placeholder || ''} onChange={(e) => updateBlock('placeholder', e.target.value)} placeholder="Например: 42" /><label className="text-sm font-medium text-slate-700">Тип поля<select className="input-field mt-1.5" value={block.inputType || 'text'} onChange={(e) => updateBlock('inputType', e.target.value as 'text' | 'number' | 'email')}><option value="text">Текст</option><option value="number">Число</option><option value="email">Email</option></select></label><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={block.required || false} onChange={(e) => updateBlock('required', e.target.checked)} />Обязательное поле</label><Input label="Ключ ответа" value={block.answerKey} onChange={(e) => updateBlock('answerKey', e.target.value)} disabled /></div>;
+    return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">InputField</h3>{renderCommonFields()}<Input label="Текст" value={block.label} onChange={(e) => updateBlock('label', e.target.value)} placeholder="Введите ответ" /><Input label="Placeholder" value={block.placeholder || ''} onChange={(e) => updateBlock('placeholder', e.target.value)} placeholder="Например: 42" /><label className="text-sm font-medium text-slate-700">Тип данных<select className="input-field mt-1.5" value={block.inputType === 'number' ? 'number' : 'text'} onChange={(e) => updateBlock('inputType', e.target.value as 'text' | 'number')}><option value="text">Текст</option><option value="number">Числа</option></select></label>{block.inputType === 'number' && (<><Input label="Правильный ответ" value={block.correctAnswer || ''} onChange={(e) => updateBlock('correctAnswer', e.target.value)} placeholder="Например: 7 — включает автопроверку" /><Input label="Допуск, %" type="number" min={0} value={block.tolerancePercent ?? ''} onChange={(e) => updateBlock('tolerancePercent', e.target.value === '' ? undefined : Math.max(0, parseFloat(e.target.value) || 0))} placeholder="0 или пусто — точное совпадение" /></>)}<label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={block.required || false} onChange={(e) => updateBlock('required', e.target.checked)} />Обязательное поле</label><div className="flex flex-col gap-1"><Input label="Ключ ответа" value={block.answerKey} onChange={(e) => updateBlock('answerKey', e.target.value)} error={answerKeyProblem} placeholder="Например: user_name" /><p className="text-xs leading-relaxed text-slate-500">Ключ значения в inputs ответа; уникален среди полей ввода.</p></div></div>;
   }
 
   if (block.type === 'Button') {
@@ -199,11 +277,11 @@ export function PropertiesPanel({ block, onChange }: Props) {
   }
 
   if (block.type === 'DragZone') {
-    return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">DragZone</h3>{renderCommonFields()}<Input label="ID зоны" value={block.zoneId} onChange={(e) => updateBlock('zoneId', e.target.value)} disabled /><Input label="Название" value={block.label} onChange={(e) => updateBlock('label', e.target.value)} placeholder="Зона 1" /><Input label="Макс. объектов" type="number" value={block.maxItems || ''} onChange={(e) => updateBlock('maxItems', e.target.value ? parseInt(e.target.value, 10) : undefined)} placeholder="Пусто — без лимита" /></div>;
+    return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">DragZone</h3>{renderCommonFields()}<div className="flex flex-col gap-1"><Input label="ID зоны" value={block.zoneId} onChange={(e) => updateBlock('zoneId', e.target.value)} error={zoneIdProblem} placeholder="Например: zone_forest" /><p className="text-xs leading-relaxed text-slate-500">Уникален среди зон. Используется в «Разрешённых зонах» объектов; при переименовании обновите ссылки вручную.</p></div><Input label="Название" value={block.label} onChange={(e) => updateBlock('label', e.target.value)} placeholder="Зона 1" /><Input label="Макс. объектов" type="number" value={block.maxItems || ''} onChange={(e) => updateBlock('maxItems', e.target.value ? parseInt(e.target.value, 10) : undefined)} placeholder="Пусто — без лимита" /><div className="flex flex-col gap-1"><IdListField key={`${block.id}-correctObjectIds`} label="Правильные объекты (через запятую)" value={block.correctObjectIds || []} onChange={(next) => updateBlock('correctObjectIds', next)} placeholder="obj_..., obj_..." /><p className="text-xs leading-relaxed text-slate-500">ID из поля «ID объекта» блоков DragObject этой карточки. Пусто — зона не проверяется. Проверка выполняется на сервере при отправке ответа.</p></div></div>;
   }
 
   if (block.type === 'DragObject') {
-    return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">DragObject</h3>{renderCommonFields()}<Input label="ID объекта" value={block.objectId} onChange={(e) => updateBlock('objectId', e.target.value)} disabled /><Input label="Текст" value={block.label || ''} onChange={(e) => updateBlock('label', e.target.value)} placeholder="Объект 1" /><label className="text-sm font-medium text-slate-700">Положение текста<select className="input-field mt-1.5" value={block.textPosition || 'left'} onChange={(e) => updateBlock('textPosition', e.target.value as 'left' | 'right' | 'top' | 'bottom')}><option value="left">Слева</option><option value="right">Справа</option><option value="top">Сверху</option><option value="bottom">Снизу</option></select></label><Input label="Разрешённые зоны (через запятую)" value={block.allowedZones.join(', ')} onChange={(e) => updateBlock('allowedZones', e.target.value.split(',').map((item) => item.trim()).filter(Boolean))} placeholder="zone_1, zone_2" /><Input label="URL изображения" value={block.image || ''} onChange={(e) => updateBlock('image', e.target.value)} placeholder="https://..." /><Input label="Макс. размер (px)" type="number" value={block.maxImageSize || ''} onChange={(e) => updateBlock('maxImageSize', e.target.value ? parseInt(e.target.value, 10) : undefined)} /><Input label="Фикс. размер (px)" type="number" value={block.imageSize || ''} onChange={(e) => updateBlock('imageSize', e.target.value ? parseInt(e.target.value, 10) : undefined)} /></div>;
+    return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">DragObject</h3>{renderCommonFields()}<div className="flex flex-col gap-1"><Input label="ID объекта" value={block.objectId} onChange={(e) => updateBlock('objectId', e.target.value)} error={objectIdProblem} placeholder="Например: obj_fox" /><p className="text-xs leading-relaxed text-slate-500">Уникален среди объектов. Используется в «Правильных объектах» зон; при переименовании обновите ссылки вручную.</p></div><Input label="Текст" value={block.label || ''} onChange={(e) => updateBlock('label', e.target.value)} placeholder="Объект 1" /><label className="text-sm font-medium text-slate-700">Положение текста<select className="input-field mt-1.5" value={block.textPosition || 'left'} onChange={(e) => updateBlock('textPosition', e.target.value as 'left' | 'right' | 'top' | 'bottom')}><option value="left">Слева</option><option value="right">Справа</option><option value="top">Сверху</option><option value="bottom">Снизу</option></select></label><IdListField key={`${block.id}-allowedZones`} label="Разрешённые зоны (через запятую)" value={block.allowedZones || []} onChange={(next) => updateBlock('allowedZones', next)} placeholder="zone_1, zone_2" /><Input label="URL изображения" value={block.image || ''} onChange={(e) => updateBlock('image', e.target.value)} placeholder="https://..." /><Input label="Макс. размер (px)" type="number" value={block.maxImageSize || ''} onChange={(e) => updateBlock('maxImageSize', e.target.value ? parseInt(e.target.value, 10) : undefined)} /><Input label="Фикс. размер (px)" type="number" value={block.imageSize || ''} onChange={(e) => updateBlock('imageSize', e.target.value ? parseInt(e.target.value, 10) : undefined)} /></div>;
   }
 
   return <div className="card-surface flex flex-col gap-3 p-4"><h3 className="mb-2 text-sm font-semibold text-slate-700">TextBlock</h3>{renderCommonFields()}<div className="flex flex-col gap-1.5"><label className="text-sm font-medium text-slate-700">Содержимое (Markdown)</label><textarea className="input-field min-h-[120px] resize-y" value={block.content} onChange={(e) => updateBlock('content', e.target.value)} placeholder={'# Заголовок\nТекст...'} /></div></div>;

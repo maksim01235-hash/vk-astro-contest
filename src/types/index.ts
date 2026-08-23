@@ -1,65 +1,237 @@
 /**
- * src/constants/index.ts — все константы приложения.
+ * types/index.ts — глобальные TypeScript-интерфейсы для всего приложения.
  *
- * Обновления (август 2026):
- *  - Удалены константы для ImageMarkerBlock.
+ * Обновления (v5, август 2026):
+ *  - ImageBlock: images[], layoutMode, gridColumns для сетки изображений.
+ *  - DnD: LayoutMode, layoutMode, gridColumns для зон и объектов.
+ *  - ImageMarkerBlock: новый блок с меткой на изображении.
  */
 
-export const SHEETS_API_URL =
-  process.env.NEXT_PUBLIC_SHEETS_API_URL || '';
+export interface VKUserInfo {
+  id: string;
+  first_name: string;
+  last_name: string;
+  name?: string;
+  photo_200?: string;
+  sex?: number;
+}
 
-export const MOCK_MODE =
-  process.env.NEXT_PUBLIC_MOCK_MODE === 'true' ||
-  process.env.NEXT_PUBLIC_MOCK_MODE === '1';
+export interface UserRecord {
+  vk_id: string;
+  name: string;
+  reg_date: string;
+  subscribed: boolean;
+  last_activity: string;
+}
 
-export const REQUEST_TIMEOUT_MS = 15000;
+export interface CardRecord {
+  card_id: string;
+  title: string;
+  release_datetime: string;
+  post_id: string;
+  json_schema: string;
+  is_active: boolean;
+}
 
-export const RETRY_COUNT = 3;
+export type CardStatus = 'locked' | 'available' | 'completed';
 
-export const RETRY_BASE_DELAY_MS = 1000;
+export interface CardWithStatus extends CardRecord {
+  status: CardStatus;
+  delta_seconds?: number;
+}
 
-export const CARDS_CACHE_TTL_MS = 5 * 60 * 1000;
+export type BlockType =
+  | 'TextBlock'
+  | 'ImageBlock'
+  | 'InputField'
+  | 'Button'
+  | 'DragZone'
+  | 'DragObject'
+  | 'ImageMarkerBlock';
 
-export const REPOST_CACHE_TTL_MS = 60 * 60 * 1000;
+export interface BaseBlock {
+  id: string;
+  type: BlockType;
+  order: number;
+}
 
-export const STORAGE_PREFIX = 'vk_contest_';
+export interface TextBlock extends BaseBlock {
+  type: 'TextBlock';
+  content: string;
+}
 
-export const STORAGE_CARDS_KEY = `${STORAGE_PREFIX}cards_cache`;
+export interface ImageItem {
+  id: string;
+  src: string;
+  alt?: string;
+}
 
-export const STORAGE_OPEN_TIME_PREFIX = `${STORAGE_PREFIX}card_`;
+/** Режим раскладки изображений и DnD-объектов. */
+export type LayoutMode = 'auto' | 'grid';
 
-export const STORAGE_REPOST_PREFIX = `${STORAGE_PREFIX}repost_`;
+export interface ImageBlock extends BaseBlock {
+  type: 'ImageBlock';
+  src?: string;
+  alt?: string;
+  width?: number | 'full';
+  maxImageWidth?: number;
+  maxImageHeight?: number;
+  viewer?: boolean;
+  images?: ImageItem[];
+  layoutMode?: 'grid' | 'flex';
+  gridColumns?: number;
+}
 
-export const STORAGE_VK_USER_KEY = `${STORAGE_PREFIX}vk_user`;
+export interface InputFieldBlock extends BaseBlock {
+  type: 'InputField';
+  label: string;
+  placeholder?: string;
+  inputType?: 'text' | 'number' | 'email';
+  required?: boolean;
+  answerKey: string;
+  /** Правильный ответ. Автопроверка включается только для чисел (inputType: 'number'). */
+  correctAnswer?: string;
+  /** Допуск отклонения в процентах от правильного ответа (0 или пусто — точное совпадение). */
+  tolerancePercent?: number;
+}
 
-export const STORAGE_NOTIF_REQUESTED = `${STORAGE_PREFIX}notif_requested`;
+export interface ButtonBlock extends BaseBlock {
+  type: 'Button';
+  label: string;
+  action: 'submit' | 'repost' | 'custom';
+  variant?: 'primary' | 'secondary' | 'danger';
+}
 
-export const STORAGE_OFFLINE_QUEUE = `${STORAGE_PREFIX}offline_answers`;
+export interface DragZoneBlock extends BaseBlock {
+  type: 'DragZone';
+  zoneId: string;
+  label: string;
+  maxItems?: number;
+  /** ID объектов, которые должны находиться в зоне для правильного ответа. */
+  correctObjectIds?: string[];
+  /** Автоматическая раскладка или сетка объектов в зоне. */
+  layoutMode?: LayoutMode;
+  /** Количество колонок для grid-режима. */
+  gridColumns?: number;
+}
 
-export const STORAGE_FIRST_VISIT = `${STORAGE_PREFIX}first_visit`;
+export type TextPosition = 'left' | 'right' | 'top' | 'bottom';
 
-export const ADMIN_PASSWORD_HASH =
-  process.env.NEXT_PUBLIC_ADMIN_PASSWORD_HASH || '';
+export interface DragObjectBlock extends BaseBlock {
+  type: 'DragObject';
+  objectId: string;
+  label?: string;
+  textPosition?: TextPosition;
+  allowedZones: string[];
+  image?: string;
+  maxImageSize?: number;
+  imageSize?: number;
+  /** Опциональный режим внутренней раскладки объекта. */
+  layoutMode?: LayoutMode;
+  /** Опциональное количество колонок для grid-режима. */
+  gridColumns?: number;
+}
 
-export const STORAGE_ADMIN_AUTH = `${STORAGE_PREFIX}admin_authed`;
+export interface ImageMarkerBlock extends BaseBlock {
+  type: 'ImageMarkerBlock';
+  src: string;
+  alt?: string;
+  maxImageWidth?: number;
+  maxImageHeight?: number;
+  viewer?: boolean;
+  correctX: number;
+  correctY: number;
+  errorPercent: number;
+  markerColor?: string;
+  markerSizePercent?: number;
+}
 
-export const VK_APP_ID = process.env.NEXT_PUBLIC_VK_APP_ID || '';
+export type Block =
+  | TextBlock
+  | ImageBlock
+  | InputFieldBlock
+  | ButtonBlock
+  | DragZoneBlock
+  | DragObjectBlock
+  | ImageMarkerBlock;
 
-export const API_ACTIONS = {
-  GET_CARDS: 'getCards',
-  GET_CARDS_LIST: 'getCardsList',
-  GET_CARD: 'getCard',
-  SAVE_ANSWER: 'saveAnswer',
-  CHECK_USER: 'checkUser',
-  SAVE_USER: 'saveUser',
-  GET_STATS: 'getStats',
-  SAVE_CARD: 'saveCard',
-  CHECK_REPOST: 'checkRepost',
-  GET_SERVER_TIME: 'getServerTime',
-  SYNC_OFFLINE: 'syncOffline',
-  SAVE_MANUAL_LOG: 'saveManualLog',
-} as const;
+export interface CardSchema {
+  blocks: Block[];
+}
 
-export type ApiAction = (typeof API_ACTIONS)[keyof typeof API_ACTIONS];
+export interface AnswerRecord {
+  id: string;
+  vk_id: string;
+  card_id: string;
+  open_timestamp: string;
+  submit_timestamp: string;
+  delta_seconds: number;
+  user_answer: string;
+  has_reposted: boolean;
+}
 
-export const ACCENT_COLOR = '#3B82F6';
+export type DnDState = Record<string, string[]>;
+
+export interface AnswerPayload {
+  inputs: Record<string, string>;
+  dnd: DnDState;
+  marker?: {
+    userX: number;
+    userY: number;
+    actualErrorPercent: number;
+    isCorrect: boolean;
+  };
+}
+
+export interface LogRecord {
+  timestamp: string;
+  vk_id: string;
+  event_type: string;
+  event_data: string;
+  page_url: string;
+  user_agent: string;
+}
+
+export interface ApiResponse<T = unknown> {
+  ok: boolean;
+  data?: T;
+  error?: string;
+}
+
+export interface CardStat {
+  card_id: string;
+  title: string;
+  total_answers: number;
+  total_users: number;
+  subscribed_count: number;
+  subscribed_group_count: number;
+  pct_answered: number;
+  avg_delta: number;
+  min_delta: number;
+  max_delta: number;
+  reposted_count: number;
+}
+
+export type EventType =
+  | 'card_open'
+  | 'card_submit'
+  | 'api_error'
+  | 'dnd_change'
+  | 'repost_click'
+  | 'repost_success'
+  | 'repost_fail'
+  | 'modal_open'
+  | 'modal_close'
+  | 'auth_success'
+  | 'auth_fail'
+  | 'notification_request'
+  | 'notification_granted'
+  | 'notification_denied'
+  | 'offline_save'
+  | 'offline_sync'
+  | 'admin_save_card'
+  | 'admin_login'
+  | 'marker_click'
+  | 'marker_move'
+  | 'marker_confirm'
+  | string;

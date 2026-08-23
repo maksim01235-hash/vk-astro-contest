@@ -113,7 +113,7 @@ export const sheetsApi = {
     vk_id: string;
     log?: LogRecord[];
   }): Promise<void> {
-    await post('saveFeedback', feedback);
+    await post(API_ACTIONS.SAVE_FEEDBACK, feedback);
   },
 
   /**

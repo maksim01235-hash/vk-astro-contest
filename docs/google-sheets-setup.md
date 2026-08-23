@@ -30,12 +30,13 @@ Google Sheets работает как база данных. Доступ идё
    - Выберите свой аккаунт.
    - Нажмите **Advanced → Go to project (unsafe)**.
    - Нажмите **Allow**.
-4. В логе выполнения увидите: "Sheets initialized: Users, Cards, Answers, Logs".
-5. Вернитесь в Google Sheets — там появятся 4 листа с заголовками:
+4. В логе выполнения увидите: "Sheets initialized: Users, Cards, Answers, Logs, Feedback".
+5. Вернитесь в Google Sheets — там появятся 5 листов с заголовками:
    - **Users**: vk_id | name | reg_date | subscribed | last_activity
    - **Cards**: card_id | title | release_datetime | post_id | json_schema | is_active
    - **Answers**: id | vk_id | card_id | open_timestamp | submit_timestamp | delta_seconds | user_answer | has_reposted
    - **Logs**: id | timestamp | vk_id | event_type | event_data | page_url | user_agent
+   - **Feedback**: id | timestamp | vk_id | name | card_id | message
 
 ## Шаг 5. Опубликуйте как веб-приложение
 

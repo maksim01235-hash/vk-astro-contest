@@ -50,6 +50,7 @@ export const API_ACTIONS = {
   GET_CARDS_LIST: 'getCardsList',
   GET_CARD: 'getCard',
   SAVE_ANSWER: 'saveAnswer',
+  SAVE_FEEDBACK: 'saveFeedback',
   CHECK_USER: 'checkUser',
   SAVE_USER: 'saveUser',
   GET_STATS: 'getStats',

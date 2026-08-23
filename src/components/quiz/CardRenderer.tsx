@@ -2,10 +2,8 @@
  * src/components/quiz/CardRenderer.tsx — рендерит карточку по JSON-схеме.
  *
  * Формат ответа:
- *  - Карточка содержит хотя бы один DnD-блок → всегда полный JSON { inputs, dnd },
- *    включая пустое состояние и unassigned-объекты.
- *  - DnD-блоков нет, одно текстовое поле → его значение без JSON-обёртки.
- *  - DnD-блоков нет, несколько текстовых полей → значения через ";".
+ *  - Всегда полный JSON { inputs, dnd }, включая пустое состояние
+ *    и unassigned-объекты DnD. Никакого схлопывания для отдельных случаев.
  */
 
 'use client';
@@ -44,41 +42,9 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
 
   const sortedBlocks = [...schema.blocks].sort((a, b) => a.order - b.order);
 
-  /**
-   * DnD-формат определяется по СХЕМЕ карточки, а не по тому,
-   * размещал ли пользователь объекты. Это сохраняет полную структуру
-   * даже при пустом ответе: { inputs: {}, dnd: { unassigned: [...] } }.
-   */
-  const cardHasDnd = sortedBlocks.some(
-    (block) => block.type === 'DragZone' || block.type === 'DragObject',
-  );
-
   const handleSubmit = () => {
-    const inputs = { ...inputsRef.current };
-    const dnd = { ...dndRef.current };
-
-    if (cardHasDnd) {
-      // В DnD-карточке всегда оставляем полный JSON.
-      onSubmit({ inputs, dnd });
-      return;
-    }
-
-    const inputKeys = Object.keys(inputs).sort();
-
-    if (inputKeys.length === 1) {
-      // Один текстовый ответ: сервер сохранит чистую строку.
-      onSubmit({ inputs: { answer: inputs[inputKeys[0]] }, dnd: {} });
-      return;
-    }
-
-    if (inputKeys.length > 1) {
-      // Несколько текстовых полей: значения в стабильном порядке через ";".
-      onSubmit({ inputs: { answer: inputKeys.map((key) => inputs[key]).join(';') }, dnd: {} });
-      return;
-    }
-
-    // Карточка без текстовых полей и без DnD.
-    onSubmit({ inputs: {}, dnd: {} });
+    // Всегда отправляем полный JSON { inputs, dnd } — единый формат для всех карточек.
+    onSubmit({ inputs: { ...inputsRef.current }, dnd: { ...dndRef.current } });
   };
 
   let dndRendered = false;

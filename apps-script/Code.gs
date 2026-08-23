@@ -4,6 +4,9 @@
  * Версия: август 2026 (добавлена поддержка ImageMarkerBlock).
  *
  * Обновления:
+ *  - checkInputsAnswer/checkDndAnswer: серверная проверка числовых ответов
+ *    (процентный допуск) и раскладки DnD по эталонным объектам зоны.
+ *  - normalizeUserAnswer: единый формат ответа { inputs, dnd } без схлопывания.
  *  - checkMarkerAnswer: проверка координат метки.
  *  - normalizeUserAnswer: поддержка поля marker.
  *  - saveAnswer: вычисление actualErrorPercent и isCorrect для маркера.
@@ -352,12 +355,139 @@ function checkMarkerAnswer(markerData, jsonSchema) {
 }
 
 /**
+ * Парсит число из произвольного значения пользователя.
+ * Запятая нормализуется в точку, пробелы обрезаются.
+ *
+ * @param {*} value - сырое значение ответа
+ * @returns {number} число или NaN, если значение не числовое
+ */
+function parseNumeric(value) {
+  if (value === null || value === undefined) return NaN;
+  var normalized = String(value).trim().replace(',', '.');
+  if (normalized === '') return NaN;
+  return parseFloat(normalized);
+}
+
+/**
+ * Проверяет числовые ответы по схеме карточки (по аналогии с checkMarkerAnswer).
+ *
+ * Автопроверка включается только для блоков InputField с inputType === 'number'
+ * и непустым correctAnswer. Допуск — процентный (tolerancePercent):
+ * isCorrect = |user − correct| / |correct| × 100 ≤ tolerancePercent.
+ * Особые случаи: correct = 0 → верен только точный 0; нечисловой ввод → isCorrect: false.
+ *
+ * @param {Object} inputs - сырые значения { [answerKey]: string }
+ * @param {Object} jsonSchema - схема карточки с блоками
+ * @returns {Object} { [answerKey]: { answer, actualErrorPercent, isCorrect } }
+ */
+function checkInputsAnswer(inputs, jsonSchema) {
+  var results = {};
+  if (!inputs || !jsonSchema || !jsonSchema.blocks) return results;
+
+  for (var i = 0; i < jsonSchema.blocks.length; i++) {
+    var block = jsonSchema.blocks[i];
+    if (!block || block.type !== 'InputField') continue;
+    if (block.inputType !== 'number') continue;
+
+    var correctRaw = block.correctAnswer;
+    if (correctRaw === undefined || correctRaw === null || String(correctRaw).trim() === '') continue;
+
+    var key = block.answerKey;
+    var rawValue = Object.prototype.hasOwnProperty.call(inputs, key) ? inputs[key] : '';
+    var userNum = parseNumeric(rawValue);
+    var correctNum = parseNumeric(correctRaw);
+
+    var tolerancePercent = parseFloat(block.tolerancePercent);
+    if (isNaN(tolerancePercent) || tolerancePercent < 0) tolerancePercent = 0;
+
+    var entry = { answer: rawValue === undefined || rawValue === null ? '' : String(rawValue) };
+
+    if (isNaN(userNum) || isNaN(correctNum)) {
+      entry.actualErrorPercent = null;
+      entry.isCorrect = false;
+    } else if (correctNum === 0) {
+      // Правильный ответ 0: процент отклонения не определён, верен только точный 0.
+      entry.actualErrorPercent = userNum === 0 ? 0 : null;
+      entry.isCorrect = userNum === 0;
+    } else {
+      var errorPercent = Math.abs(userNum - correctNum) / Math.abs(correctNum) * 100;
+      entry.actualErrorPercent = Math.round(errorPercent * 100) / 100;
+      entry.isCorrect = errorPercent <= tolerancePercent;
+    }
+
+    results[key] = entry;
+  }
+
+  return results;
+}
+
+/**
+ * Возвращает карту эталонных объектов DnD-зон из схемы карточки.
+ *
+ * @param {Object} jsonSchema - схема карточки с блоками
+ * @returns {Object} { [zoneId]: string[] } — только зоны с непустым correctObjectIds
+ */
+function getDndExpectedMap(jsonSchema) {
+  var expectedMap = {};
+  if (!jsonSchema || !jsonSchema.blocks) return expectedMap;
+
+  for (var i = 0; i < jsonSchema.blocks.length; i++) {
+    var block = jsonSchema.blocks[i];
+    if (!block || block.type !== 'DragZone') continue;
+    if (!Array.isArray(block.correctObjectIds) || block.correctObjectIds.length === 0) continue;
+    expectedMap[block.zoneId] = block.correctObjectIds;
+  }
+
+  return expectedMap;
+}
+
+/**
+ * Проверяет раскладку одной зоны: каждый объект верен, если он входит
+ * в список эталонных; зона верна при точном совпадении множеств объектов.
+ * Порядок объектов произвольный.
+ *
+ * @param {string[]} objectIds - фактические объекты зоны
+ * @param {string[]} expectedIds - эталонные объекты зоны
+ * @returns {Object} { objectsCorrect: boolean[], isCorrect: boolean }
+ */
+function checkDndZone(objectIds, expectedIds) {
+  var expectedMap = {};
+  for (var j = 0; j < expectedIds.length; j++) {
+    expectedMap[expectedIds[j]] = true;
+  }
+
+  var actualMap = {};
+  var objectsCorrect = [];
+  for (var k = 0; k < objectIds.length; k++) {
+    objectsCorrect.push(expectedMap[objectIds[k]] === true);
+    actualMap[objectIds[k]] = true;
+  }
+
+  var isCorrect = objectIds.length === expectedIds.length;
+  if (isCorrect) {
+    for (var m = 0; m < expectedIds.length; m++) {
+      if (actualMap[expectedIds[m]] !== true) {
+        isCorrect = false;
+        break;
+      }
+    }
+  }
+
+  return {
+    objectsCorrect: objectsCorrect,
+    isCorrect: isCorrect,
+  };
+}
+
+/**
  * Преобразует ответ в строку для Answers.user_answer.
  *
- * Правила:
- * 1. DnD есть (включая пустое/неразмещённое состояние) → полный JSON.
- * 2. DnD отсутствует, один inputs.answer → чистая строка ответа.
- * 3. DnD отсутствует, несколько inputs → значения через ";".
+ * Правила (единый формат для всех карточек):
+ * 1. Всегда полный JSON { inputs, dnd }, включая пустое состояние.
+ * 2. Числовые InputField с заданным correctAnswer записываются как
+ *    { answer, actualErrorPercent, isCorrect }; остальные поля — строкой.
+ * 3. DragZone со списком correctObjectIds записывается как
+ *    { objects, objectsCorrect, isCorrect }; остальные зоны — массивом id.
  * 4. Marker есть → добавляется поле marker с результатами проверки.
  */
 function normalizeUserAnswer(rawAnswer, jsonSchema) {
@@ -377,7 +507,6 @@ function normalizeUserAnswer(rawAnswer, jsonSchema) {
   var inputs = parsed.inputs || {};
   var dnd = parsed.dnd || {};
   var marker = parsed.marker || null;
-  var dndKeys = Object.keys(dnd);
 
   // Проверяем наличие маркера и вычисляем правильность.
   var markerResult = null;
@@ -385,39 +514,46 @@ function normalizeUserAnswer(rawAnswer, jsonSchema) {
     markerResult = checkMarkerAnswer(marker, jsonSchema);
   }
 
-  // Формируем итоговый ответ.
-  var result = {};
-
-  if (dndKeys.length > 0) {
-    result.inputs = inputs;
-    result.dnd = dnd;
-    if (markerResult) {
-      result.marker = markerResult;
+  // Проверка числовых полей: проверяемые ключи заменяются объектом результата,
+  // остальные поля сохраняются строкой «как есть».
+  var checkedInputs = checkInputsAnswer(inputs, jsonSchema);
+  var inputsOut = {};
+  for (var inputKey in inputs) {
+    if (Object.prototype.hasOwnProperty.call(inputs, inputKey)) {
+      inputsOut[inputKey] = Object.prototype.hasOwnProperty.call(checkedInputs, inputKey)
+        ? checkedInputs[inputKey]
+        : inputs[inputKey];
     }
-    return JSON.stringify(result);
   }
 
-  var inputKeys = Object.keys(inputs).sort();
-
-  if (inputKeys.length === 1) {
-    result.answer = String(inputs[inputKeys[0]] === undefined ? '' : inputs[inputKeys[0]]);
-    if (markerResult) {
-      result.marker = markerResult;
+  // Проверка DnD-зон: настроенные зоны заменяются объектом результата,
+  // остальные (и unassigned) остаются массивами id.
+  var expectedMap = getDndExpectedMap(jsonSchema);
+  var dndOut = {};
+  for (var zoneKey in dnd) {
+    if (!Object.prototype.hasOwnProperty.call(dnd, zoneKey)) continue;
+    var zoneObjects = dnd[zoneKey];
+    if (
+      Array.isArray(zoneObjects) &&
+      zoneKey !== 'unassigned' &&
+      Object.prototype.hasOwnProperty.call(expectedMap, zoneKey)
+    ) {
+      var zoneCheck = checkDndZone(zoneObjects, expectedMap[zoneKey]);
+      dndOut[zoneKey] = {
+        objects: zoneObjects,
+        objectsCorrect: zoneCheck.objectsCorrect,
+        isCorrect: zoneCheck.isCorrect,
+      };
+    } else {
+      dndOut[zoneKey] = zoneObjects;
     }
-    return JSON.stringify(result);
   }
 
-  if (inputKeys.length > 1) {
-    result.answer = inputKeys.map(function(key) {
-      return String(inputs[key] === undefined ? '' : inputs[key]);
-    }).join(';');
-    if (markerResult) {
-      result.marker = markerResult;
-    }
-    return JSON.stringify(result);
-  }
-
-  // Только маркер.
+  // Единый формат: всегда полный JSON { inputs, dnd } (+ marker при наличии).
+  var result = {
+    inputs: inputsOut,
+    dnd: dndOut,
+  };
   if (markerResult) {
     result.marker = markerResult;
   }

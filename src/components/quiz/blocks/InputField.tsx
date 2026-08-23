@@ -4,7 +4,7 @@
 
 'use client';
 
-import { InputFieldBlock as InputFieldBlockType } from '@/types';
+import type { InputFieldBlock as InputFieldBlockType } from '@/types';
 import { Input } from '@/components/ui/Input';
 
 interface Props {

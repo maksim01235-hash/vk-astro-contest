@@ -46,6 +46,8 @@ export function createBlock(type: BlockType, order: number): Block {
         inputType: 'text',
         required: false,
         answerKey: `answer_${id}`,
+        correctAnswer: '',
+        tolerancePercent: undefined,
       };
 
     case 'Button':
@@ -66,6 +68,7 @@ export function createBlock(type: BlockType, order: number): Block {
         zoneId: `zone_${id}`,
         label: 'Зона',
         maxItems: undefined,
+        correctObjectIds: [],
       };
 
     case 'DragObject':
