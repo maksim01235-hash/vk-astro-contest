@@ -43,11 +43,13 @@ function doGet(e) {
       case 'getCardsList': result = getCardsList(); break;
       case 'getCard': result = getCard(e.parameter.id); break;
       case 'checkUser': result = checkUser(e.parameter.vk_id, e.parameter.name); break;
+      case 'getAnsweredCards': result = getAnsweredCards(e.parameter.vk_id); break;
       case 'getStats': result = getStats(); break;
       case 'checkRepost': result = checkRepostViaVK(e.parameter.vk_id, e.parameter.post_id); break;
       case 'getServerTime': result = { iso: new Date().toISOString() }; break;
       default: return jsonOut({ ok: false, error: 'Unknown action: ' + action });
     }
+
 
     return jsonOut({ ok: true, data: result });
   } catch (error) {
@@ -233,25 +235,44 @@ function invalidateCardCache(cardId) {
 function saveCard(card) {
   if (!card.card_id) throw new Error('card_id is required');
 
-  var record = {
-    card_id: card.card_id,
-    title: card.title || '',
-    release_datetime: card.release_datetime || '',
-    post_id: card.post_id || '',
-    json_schema: typeof card.json_schema === 'string'
-      ? card.json_schema
-      : JSON.stringify(card.json_schema),
-    is_active: card.is_active !== false,
-  };
+  // Строгий режим (клиент всегда шлёт is_edit): защита от дублей card_id.
+  //  - is_edit=true  → карточка обязана существовать (обновление);
+  //  - is_edit=false → карточки с таким id быть не должно (создание);
+  // без флага — прежний апсерт для совместимости.
+  var strict = typeof card.is_edit === 'boolean';
 
-  if (findRow(SHEET_CARDS, 'card_id', card.card_id)) {
-    updateRow(SHEET_CARDS, 'card_id', card.card_id, record);
-  } else {
-    appendRow(SHEET_CARDS, record);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var exists = !!findRow(SHEET_CARDS, 'card_id', card.card_id);
+
+    if (strict) {
+      if (card.is_edit && !exists) throw new Error('CARD_NOT_FOUND');
+      if (!card.is_edit && exists) throw new Error('CARD_ID_TAKEN');
+    }
+
+    var record = {
+      card_id: card.card_id,
+      title: card.title || '',
+      release_datetime: card.release_datetime || '',
+      post_id: card.post_id || '',
+      json_schema: typeof card.json_schema === 'string'
+        ? card.json_schema
+        : JSON.stringify(card.json_schema),
+      is_active: card.is_active !== false,
+    };
+
+    if (exists) {
+      updateRow(SHEET_CARDS, 'card_id', card.card_id, record);
+    } else {
+      appendRow(SHEET_CARDS, record);
+    }
+
+    invalidateCardCache(card.card_id);
+    return { saved: true, created: !exists };
+  } finally {
+    lock.releaseLock();
   }
-
-  invalidateCardCache(card.card_id);
-  return { saved: true };
 }
 
 // ============================================================
@@ -565,35 +586,80 @@ function saveAnswer(answer) {
     throw new Error('vk_id and card_id are required');
   }
 
-  var id = nextId(SHEET_ANSWERS);
+  // Сериализуем проверку дубля и вставку: параллельные запросы без лока
+  // могли бы оба пройти проверку и записать два одинаковых ответа.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (hasUserAnswered(answer.vk_id, answer.card_id)) {
+      throw new Error('ANSWER_DUPLICATE');
+    }
 
-  // Получаем схему карточки для проверки маркера.
-  var card = getCard(answer.card_id);
-  var jsonSchema = null;
-  if (card && card.json_schema) {
-    try {
-      jsonSchema = JSON.parse(card.json_schema);
-    } catch (e) {
-      Logger.log('Failed to parse json_schema: ' + e);
+    var id = nextId(SHEET_ANSWERS);
+
+    // Получаем схему карточки для проверки маркера.
+    var card = getCard(answer.card_id);
+    var jsonSchema = null;
+    if (card && card.json_schema) {
+      try {
+        jsonSchema = JSON.parse(card.json_schema);
+      } catch (e) {
+        Logger.log('Failed to parse json_schema: ' + e);
+      }
+    }
+
+    appendRow(SHEET_ANSWERS, {
+      id: id,
+      vk_id: answer.vk_id,
+      card_id: answer.card_id,
+      open_timestamp: answer.open_timestamp,
+      submit_timestamp: answer.submit_timestamp || new Date().toISOString(),
+      delta_seconds: answer.delta_seconds || 0,
+      user_answer: normalizeUserAnswer(answer.user_answer, jsonSchema),
+      has_reposted: answer.has_reposted || false,
+    });
+
+    if (answer.log && Array.isArray(answer.log) && answer.log.length > 0) {
+      writeLog(answer.vk_id, answer.log);
+    }
+
+    return { id: id };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Отвечал ли пользователь на карточку (пара vk_id + card_id в Answers).
+ */
+function hasUserAnswered(vkId, cardId) {
+  var rows = readSheet(SHEET_ANSWERS);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].vk_id) === String(vkId) && String(rows[i].card_id) === String(cardId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Список карточек, на которые пользователь уже ответил.
+ *
+ * @param {string} vkId
+ * @returns {string[]} массив card_id
+ */
+function getAnsweredCards(vkId) {
+  if (!vkId) throw new Error('vk_id is required');
+
+  var rows = readSheet(SHEET_ANSWERS);
+  var answered = {};
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].vk_id) === String(vkId)) {
+      answered[String(rows[i].card_id)] = true;
     }
   }
 
-  appendRow(SHEET_ANSWERS, {
-    id: id,
-    vk_id: answer.vk_id,
-    card_id: answer.card_id,
-    open_timestamp: answer.open_timestamp,
-    submit_timestamp: answer.submit_timestamp || new Date().toISOString(),
-    delta_seconds: answer.delta_seconds || 0,
-    user_answer: normalizeUserAnswer(answer.user_answer, jsonSchema),
-    has_reposted: answer.has_reposted || false,
-  });
-
-  if (answer.log && Array.isArray(answer.log) && answer.log.length > 0) {
-    writeLog(answer.vk_id, answer.log);
-  }
-
-  return { id: id };
+  return Object.keys(answered);
 }
 
 function writeLog(vkId, events) {
@@ -761,17 +827,24 @@ function getGroupSubscribedCount(vkIds) {
 function syncOffline(body) {
   var answers = body.answers || [];
   var saved = 0;
+  var skipped = 0;
 
   answers.forEach(function(answer) {
     try {
       saveAnswer(answer);
       saved += 1;
     } catch (error) {
-      Logger.log('syncOffline failed: ' + String(error));
+      // Дубликат после сбоя между сохранением и очисткой очереди —
+      // это нормальный исход: ответ уже есть в таблице.
+      if (String(error).indexOf('ANSWER_DUPLICATE') !== -1) {
+        skipped += 1;
+      } else {
+        Logger.log('syncOffline failed: ' + String(error));
+      }
     }
   });
 
-  return { saved: saved };
+  return { saved: saved, skipped: skipped };
 }
 
 // ============================================================

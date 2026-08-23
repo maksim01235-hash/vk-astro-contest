@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useUserStore } from '@/lib/store/userStore';
 import { useCardsStore } from '@/lib/store/cardsStore';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
@@ -14,6 +15,7 @@ import type { CardRecord, CardWithStatus } from '@/types';
 
 export default function HomePage() {
   const { isAuthed, loading: authLoading, login } = useAuth();
+  const answeredCardIds = useUserStore((state) => state.answeredCardIds);
   const { cards, setCards, loading, setLoading, error, setError } = useCardsStore();
   const [submittedCards, setSubmittedCards] = useState<Set<string>>(new Set());
 
@@ -44,13 +46,15 @@ export default function HomePage() {
   }, [isAuthed]);
 
   useEffect(() => {
-    const submitted = new Set<string>();
+    // «Выполнено» — по серверному списку отвеченных И локальному флагу
+    // (локальный закрывает случай, когда серверный список ещё не подгрузился).
+    const submitted = new Set<string>(answeredCardIds);
     for (const card of cards) {
       const result = getRaw<{ submitted: boolean }>(`${STORAGE_OPEN_TIME_PREFIX}${card.card_id}_submitted`);
       if (result?.submitted) submitted.add(card.card_id);
     }
     setSubmittedCards(submitted);
-  }, [cards]);
+  }, [cards, answeredCardIds]);
 
   const getStatus = (card: CardRecord): CardWithStatus['status'] => {
     if (submittedCards.has(card.card_id)) return 'completed';

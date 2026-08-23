@@ -58,9 +58,14 @@ export function Providers({ children }: { children: ReactNode }) {
       if (!queue || queue.length === 0) return;
 
       try {
-        await sheetsApi.syncOffline(queue);
-        setRaw(STORAGE_OFFLINE_QUEUE, []);
-        await logEvent('offline_sync', { count: queue.length });
+        const { saved, skipped } = await sheetsApi.syncOffline(queue);
+        // Очищаем очередь только когда сервер обработал всё (сохранено +
+        // отброшено как дубликаты). Необработанные ответы остаются для
+        // повторного синка — дедупликация на сервере делает его безопасным.
+        if (saved + skipped >= queue.length) {
+          setRaw(STORAGE_OFFLINE_QUEUE, []);
+        }
+        await logEvent('offline_sync', { count: queue.length, saved, skipped });
       } catch (error) {
         console.warn('[providers] offline sync failed:', error);
       }
