@@ -144,6 +144,8 @@ export interface ImageMarkerBlock extends BaseBlock {
   errorPercent: number;
   markerColor?: string;
   markerSizePercent?: number;
+  /** Режим перемещения метки: true — перетаскивается сразу, без клика-активации. */
+  markerImmediateDrag?: boolean;
 }
 
 export type Block =
@@ -214,6 +216,7 @@ export interface CardStat {
 export type EventType =
   | 'card_open'
   | 'card_submit'
+  | 'feedback_submit'
   | 'api_error'
   | 'dnd_change'
   | 'repost_click'

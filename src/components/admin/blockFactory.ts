@@ -100,6 +100,7 @@ export function createBlock(type: BlockType, order: number): Block {
         errorPercent: 10,
         markerColor: '#3B82F6',
         markerSizePercent: 5,
+        markerImmediateDrag: false,
       };
 
     default:

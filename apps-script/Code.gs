@@ -8,6 +8,8 @@
  *    карточки хранится на сервере (пара vk_id + card_id, под лока́том).
  *  - writeLog: запись по колонкам согласно заголовкам листа Logs
  *    (раньше данные писались со сдвигом в 3 колонки из 7).
+ *  - writeLog: атомарный appendRow + LockService — без потери строк
+ *    при параллельных запросах (формат Logs прежний: 3 колонки).
  *  - checkInputsAnswer/checkDndAnswer: серверная проверка числовых ответов
  *    (процентный допуск) и раскладки DnD по эталонным объектам зоны.
  *  - normalizeUserAnswer: единый формат ответа { inputs, dnd } без схлопывания.
@@ -755,6 +757,21 @@ function writeLog(vkId, events) {
     sheet
       .getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length)
       .setValues(rows);
+  // Сериализуем записи в Logs: параллельные запросы без лока вычисляли бы
+  // одну и ту же «следующую строку» и затирали друг друга.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var sheet = getSheet(SHEET_LOGS);
+    // Атомарное добавление в конец: три колонки
+    // [vk_id, timestamp, весь накопленный лог одной JSON-строкой].
+    sheet.appendRow([
+      vkId || 'anonymous',
+      new Date().toISOString(),
+      JSON.stringify(events),
+    ]);
+  } finally {
+    lock.releaseLock();
   }
 }
 

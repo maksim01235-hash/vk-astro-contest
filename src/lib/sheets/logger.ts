@@ -7,9 +7,13 @@
  * вроде marker_move могли раздуть payload saveAnswer до десятков КБ, что на
  * слабой сети приводило к таймаутам и «пропадающим» логам. При переполнении
  * самые старые события отбрасываются — свежая диагностика важнее полной истории.
+ * logEvent синхронна (статический импорт стора): событие попадает в буфер
+ * немедленно и гарантированно присутствует в снапшоте при последующем
+ * getLogBuffer() — даже если отправка происходит в том же обработчике.
  */
 
-import type { EventType, LogRecord } from '@/types';
+import { useUserStore } from '@/lib/store/userStore';
+import type { EventType } from '@/types';
 
 /** Максимум событий в буфере (одна отправка не тяжелее ~50–70 КБ). */
 const MAX_LOG_BUFFER = 200;
@@ -28,9 +32,9 @@ let logBuffer: LogEntry[] = [];
 /**
  * Добавить событие в буфер логов.
  */
-export async function logEvent(eventType: EventType, eventData: Record<string, unknown>) {
-  const vkUser = await import('@/lib/store/userStore').then((m) => m.useUserStore.getState().vkUser);
-  const entry: LogEntry = {
+export function logEvent(eventType: EventType, eventData: Record<string, unknown>) {
+  const vkUser = useUserStore.getState().vkUser;
+  logBuffer.push({
     timestamp: new Date().toISOString(),
     vk_id: vkUser?.id || 'anonymous',
     event_type: eventType,
@@ -43,6 +47,7 @@ export async function logEvent(eventType: EventType, eventData: Record<string, u
   if (logBuffer.length > MAX_LOG_BUFFER) {
     logBuffer.splice(0, logBuffer.length - MAX_LOG_BUFFER);
   }
+  });
 }
 
 /**

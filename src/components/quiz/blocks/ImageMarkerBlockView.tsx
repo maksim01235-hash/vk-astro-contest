@@ -188,6 +188,8 @@ export function ImageMarkerBlockView({ block, position, onPositionChange }: Prop
         markerSizePercent={sizePercent}
         onMarkerChange={handleMarkerChange}
         showMarkerCoords={isAdmin}
+        disableSwipe
+        immediateDrag={block.markerImmediateDrag === true}
       />
     </div>
   );
