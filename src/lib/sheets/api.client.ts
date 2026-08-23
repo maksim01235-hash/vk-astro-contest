@@ -180,12 +180,16 @@ export const sheetsApi = {
   },
 
   /**
-   * Ручная отправка лога из админки (кнопка "Отправить лог").
-   * Пишет одну строку в лист Logs с vk_id="admin" на стороне Apps Script.
+   * Ручная/автоматическая отправка лога одной записью.
+   * @param vkId — владелец лога (автосброс буфера передаёт id пользователя);
+   *              без него сервер пишет vk_id='admin' (кнопка в админке).
    */
-  saveManualLog(log: LogRecord[]): Promise<{ saved: boolean; count: number }> {
+  saveManualLog(log: LogRecord[], vkId?: string): Promise<{ saved: boolean; count: number }> {
     return gate(API_ACTIONS.SAVE_MANUAL_LOG, 'single', () =>
-      post<{ saved: boolean; count: number }>(API_ACTIONS.SAVE_MANUAL_LOG, { log }),
+      post<{ saved: boolean; count: number }>(API_ACTIONS.SAVE_MANUAL_LOG, {
+        log,
+        vk_id: vkId,
+      }),
     );
   },
 
