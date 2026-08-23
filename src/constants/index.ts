@@ -13,6 +13,9 @@
 export const SHEETS_API_URL =
   process.env.NEXT_PUBLIC_SHEETS_API_URL || '';
 
+/** Серверный API настроен? Без него обращения к Sheets бессмысленны. */
+export const HAS_SHEETS_API = SHEETS_API_URL.length > 0;
+
 export const MOCK_MODE =
   process.env.NEXT_PUBLIC_MOCK_MODE === 'true' ||
   process.env.NEXT_PUBLIC_MOCK_MODE === '1';
