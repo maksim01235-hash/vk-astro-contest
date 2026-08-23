@@ -15,7 +15,6 @@ import { useState } from 'react';
 import type { Block, BlockType, ImageBlock, ImageItem, ImageMarkerBlock as ImageMarkerBlockType } from '@/types';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import clsx from 'clsx';
 
 /**
  * Поле ввода списка идентификаторов через запятую (correctObjectIds, allowedZones).
@@ -249,21 +248,26 @@ export function PropertiesPanel({ block, blocks, blockIndex, onChangeFor }: Prop
         {block.src && (
           <div className="mt-2 border-t border-slate-200 pt-3">
             <h4 className="mb-2 text-xs font-semibold text-slate-600">Превью правильной позиции</h4>
-            <div className="relative w-full overflow-hidden rounded-xl bg-slate-100">
-              <img src={block.src} alt="Превью" className="w-full" style={{ maxHeight: '200px', objectFit: 'contain' }} />
-              <span
-                className={clsx('absolute rounded-full border-2 border-white shadow-md')}
-                style={{
-                  left: `${block.correctX}%`,
-                  top: `${block.correctY}%`,
-                  width: `${markerSizePercent}%`,
-                  aspectRatio: '1',
-                  backgroundColor: markerColor,
-                  transform: 'translate(-50%, -50%)',
-                  boxShadow: '0 0 0 2px rgba(0,0,0,.3)',
-                }}
-              />
-              <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-1 font-mono text-xs text-white">X: {block.correctX}%, Y: {block.correctY}%</span>
+            {/* Обёртка ровно по размеру картинки (без objectFit/letterbox):
+                проценты метки считаются от самого изображения,
+                поэтому превью совпадает с реальными координатами в квизе. */}
+            <div className="flex justify-center rounded-xl bg-slate-100 p-2">
+              <span className="relative block">
+                <img src={block.src} alt="Превью" className="block" style={{ maxWidth: '100%', maxHeight: '220px' }} />
+                <span
+                  className="pointer-events-none absolute rounded-full border-2 border-white"
+                  style={{
+                    left: `${block.correctX}%`,
+                    top: `${block.correctY}%`,
+                    width: `${markerSizePercent}%`,
+                    aspectRatio: '1',
+                    backgroundColor: markerColor,
+                    transform: 'translate(-50%, -50%)',
+                    boxShadow: '0 0 0 2px rgba(0,0,0,.3)',
+                  }}
+                />
+                <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white">X: {block.correctX}%, Y: {block.correctY}%</span>
+              </span>
             </div>
           </div>
         )}

@@ -7,11 +7,13 @@
  *    за это время нужно нажать и перетащить её. Отпускание пальца фиксирует позицию.
  *  - Координаты (0–100%) уходят в ответе как marker.userX/userY,
  *    проверку выполняет Apps Script (checkMarkerAnswer).
+ *  - Для вошедшего админа (флаг STORAGE_ADMIN_AUTH) на фото отображается
+ *    бейдж с текущими координатами метки — удобно подбирать correctX/correctY.
  */
 
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ImageMarkerBlock } from '@/types';
 import {
   PhotoSwipeViewer,
@@ -20,6 +22,8 @@ import {
   type PhotoSwipeImage,
 } from '@/components/quiz/PhotoSwipeViewer';
 import { logEvent } from '@/lib/sheets/logger';
+import { getRaw } from '@/utils/storage';
+import { STORAGE_ADMIN_AUTH } from '@/constants';
 import clsx from 'clsx';
 
 interface Props {
@@ -31,6 +35,13 @@ interface Props {
 
 export function ImageMarkerBlockView({ block, position, onPositionChange }: Props) {
   const [viewerOpen, setViewerOpen] = useState(false);
+  // Флаг админа читаем после монтирования: localStorage недоступен при
+  // пререндере, а раннее чтение дало бы рассинхрон гидратации.
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    setIsAdmin(getRaw<boolean>(STORAGE_ADMIN_AUTH) === true);
+  }, []);
 
   // Стабильный массив изображений: пересоздание приводило бы к destroy/init лайтбокса.
   const images = useMemo<PhotoSwipeImage[]>(
@@ -102,6 +113,11 @@ export function ImageMarkerBlockView({ block, position, onPositionChange }: Prop
             boxShadow: '0 0 0 2px rgba(0,0,0,.3)',
           }}
         />
+        {isAdmin && (
+          <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-1 font-mono text-xs text-white">
+            X: {Math.round(position.x)}%, Y: {Math.round(position.y)}%
+          </span>
+        )}
       </button>
 
       {block.viewer !== false && (
@@ -120,6 +136,7 @@ export function ImageMarkerBlockView({ block, position, onPositionChange }: Prop
         markerColor={block.markerColor || '#3B82F6'}
         markerSizePercent={sizePercent}
         onMarkerChange={handleMarkerChange}
+        showMarkerCoords={isAdmin}
       />
     </div>
   );

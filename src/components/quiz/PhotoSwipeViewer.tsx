@@ -29,6 +29,8 @@ interface Props {
   markerSizePercent?: number;
   /** Вызывается на каждое перемещение метки во время перетаскивания. */
   onMarkerChange?: (position: MarkerPosition) => void;
+  /** Показывать в фуллскрине бейдж с текущими координатами метки (режим админа). */
+  showMarkerCoords?: boolean;
 }
 
 type Dimensions = Record<string, { width: number; height: number }>;
@@ -85,6 +87,7 @@ export function PhotoSwipeViewer({
   markerColor = '#3B82F6',
   markerSizePercent = 5,
   onMarkerChange,
+  showMarkerCoords = false,
 }: Props) {
   const lightboxRef = useRef<PhotoSwipeLightbox | null>(null);
   const pswpRef = useRef<PswpCore | null>(null);
@@ -98,15 +101,29 @@ export function PhotoSwipeViewer({
   const suppressClickRef = useRef(false);
   const [ready, setReady] = useState(false);
 
-  // Свежие колбэки в рефах: пересоздание стрелок родителем (например, при
+  // Свежие колбэки и пропсы в рефах: пересоздание стрелок родителем (например, при
   // обновлении состояния на каждый pointermove) не должно пересоздавать лайтбокс.
   const onCloseRef = useRef(onClose);
   const onMarkerChangeRef = useRef(onMarkerChange);
+  const showMarkerCoordsRef = useRef(showMarkerCoords);
 
   markerRef.current = marker;
   onCloseRef.current = onClose;
   onMarkerChangeRef.current = onMarkerChange;
+  showMarkerCoordsRef.current = showMarkerCoords;
 
+  /**
+   * Обновляет бейдж координат метки в фуллскрине (режим админа).
+   * Позиция без аргумента — текущая из markerRef (кадр синхронизации),
+   * с аргументом — только что вычисленная при перетаскивании.
+   */
+  const updateCoordsBadge = useCallback((position?: MarkerPosition) => {
+    const pos = position ?? markerRef.current;
+    if (!pos) return;
+    const badge = document.querySelector<HTMLElement>('.contest-pswp__marker-coords');
+    if (!badge) return;
+    badge.textContent = `X: ${Math.round(pos.x)}%, Y: ${Math.round(pos.y)}%`;
+  }, []);
   /**
    * Рамка миникарты строится по фактической матрице трансформации:
    * visible origin в координатах исходной картинки = -pan / zoom.
@@ -190,7 +207,9 @@ export function PhotoSwipeViewer({
     dot.style.height = `${size}px`;
     dot.style.backgroundColor = markerColor;
     dot.style.display = 'block';
-  }, [markerColor, markerSizePercent]);
+
+    updateCoordsBadge(position);
+  }, [markerColor, markerSizePercent, updateCoordsBadge]);
 
   /** Визуальное состояние метки: классы активности и видимость подсказки. */
   const applyMarkerVisual = useCallback(() => {
@@ -248,8 +267,9 @@ export function PhotoSwipeViewer({
       dot.style.top = `${clientY}px`;
     }
 
+    updateCoordsBadge(next);
     onMarkerChangeRef.current?.(next);
-  }, []);
+  }, [updateCoordsBadge]);
 
   useEffect(() => {
     if (!open || !images.length) return;
@@ -374,6 +394,18 @@ export function PhotoSwipeViewer({
           appendTo: 'root',
           html: 'Перетащите метку',
         });
+
+        if (showMarkerCoordsRef.current) {
+          const initial = markerRef.current;
+          pswp.ui.registerElement({
+            name: 'contest-marker-coords',
+            order: 6,
+            tagName: 'div',
+            className: 'contest-pswp__marker-coords',
+            appendTo: 'root',
+            html: initial ? `X: ${Math.round(initial.x)}%, Y: ${Math.round(initial.y)}%` : '',
+          });
+        }
       }
 
       pswp.on('change', () => { disarmMarker(); draggingRef.current = false; });
@@ -448,6 +480,7 @@ export function PhotoSwipeViewerStyles() {
       .pswp .contest-pswp__marker--dragging { animation:none; }
       @keyframes contest-marker-pulse { 0%,100% { box-shadow:0 0 0 3px rgba(59,130,246,.65),0 4px 14px rgba(0,0,0,.45); } 50% { box-shadow:0 0 0 14px rgba(59,130,246,0),0 4px 14px rgba(0,0,0,.45); } }
       .pswp .contest-pswp__marker-hint { display:none; position:fixed; top:calc(20px + env(safe-area-inset-top, 0px)); left:50%; transform:translateX(-50%); padding:8px 16px; border-radius:999px; background:rgba(7,12,20,.78); color:#fff; font-size:13px; white-space:nowrap; pointer-events:none; z-index:10012; }
+      .pswp .contest-pswp__marker-coords { position:fixed; top:calc(20px + env(safe-area-inset-top, 0px)); right:calc(16px + env(safe-area-inset-right, 0px)); padding:8px 14px; border-radius:999px; background:rgba(7,12,20,.78); color:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; white-space:nowrap; pointer-events:none; z-index:10012; }
       @media (max-width:640px) { .pswp .contest-pswp__close { top:calc(12px + env(safe-area-inset-top, 0px)); left:calc(12px + env(safe-area-inset-left, 0px)); width:50px; height:50px; } .pswp .contest-pswp__minimap { left:calc(12px + env(safe-area-inset-left, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); width:min(30vw,180px); } .pswp .contest-pswp__zoom { right:calc(12px + env(safe-area-inset-right, 0px)); bottom:calc(12px + env(safe-area-inset-bottom, 0px)); } .pswp .contest-pswp__zoom button { width:46px; height:46px; font-size:30px; } }
     `}</style>
   );
