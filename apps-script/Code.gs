@@ -6,10 +6,11 @@
  * Обновления:
  *  - Новый лист Opens + действие markCardOpen: время первого просмотра
  *    карточки хранится на сервере (пара vk_id + card_id, под лока́том).
- *  - writeLog: запись по колонкам согласно заголовкам листа Logs
- *    (раньше данные писались со сдвигом в 3 колонки из 7).
- *  - writeLog: атомарный appendRow + LockService — без потери строк
- *    при параллельных запросах (формат Logs прежний: 3 колонки).
+ *  - Logs: одна строка на отправку — [vk_id, timestamp, log], где log —
+ *    вся накопленная пачка событий одной JSON-строкой. Атомарный appendRow
+ *    под LockService; клиент автоматически сбрасывает буфер при переполнении.
+ *  - saveManualLog: принимает vk_id владельца лога (автосброс клиента),
+ *    по умолчанию 'admin' (кнопка в админке).
  *  - checkInputsAnswer/checkDndAnswer: серверная проверка числовых ответов
  *    (процентный допуск) и раскладки DnD по эталонным объектам зоны.
  *  - normalizeUserAnswer: единый формат ответа { inputs, dnd } без схлопывания.
@@ -27,7 +28,7 @@ var HEADERS = {
   Users: ['vk_id', 'name', 'reg_date', 'subscribed', 'last_activity'],
   Cards: ['card_id', 'title', 'release_datetime', 'post_id', 'json_schema', 'is_active'],
   Answers: ['id', 'vk_id', 'card_id', 'open_timestamp', 'submit_timestamp', 'delta_seconds', 'user_answer', 'has_reposted'],
-  Logs: ['id', 'timestamp', 'vk_id', 'event_type', 'event_data', 'page_url', 'user_agent'],
+  Logs: ['vk_id', 'timestamp', 'log'],
   Feedback: ['id', 'timestamp', 'vk_id', 'name', 'card_id', 'message'],
   Opens: ['vk_id', 'card_id', 'first_open_timestamp'],
 };
@@ -715,48 +716,18 @@ function getAnsweredCards(vkId) {
 }
 
 /**
- * Записывает события в лист Logs по колонкам согласно HEADERS.Logs:
- * id | timestamp | vk_id | event_type | event_data | page_url | user_agent.
+ * Записывает накопленную пачку событий в лист Logs ОДНОЙ строкой:
+ * [vk_id, timestamp, log] — вся пачка сериализуется одной JSON-строкой
+ * в ячейке «log». Одна строка = одна отправка (ответ, отзыв, автосброс,
+ * ручная отправка из админки); старые строки остаются как архив.
  *
- * Раньше вся пачка писалась одной строкой в 3 колонки — данные были сдвинуты
- * относительно заголовков. Теперь каждая строка соответствует одному событию;
- * старые строки остаются как архив.
+ * LockService + appendRow: параллельные запросы без лока вычисляли бы
+ * одну и ту же «следующую строку» и затирали бы друг друга.
  *
- * @param {string} vkId - владелец лога ('admin' для ручной отправки из админки)
+ * @param {string} vkId - владелец лога ('admin' для ручной отправки из админ­ки)
  * @param {Array<Object>} events - события буфера { timestamp, event_type, event_data, ... }
  */
 function writeLog(vkId, events) {
-  var sheet = getSheet(SHEET_LOGS);
-  var headers = HEADERS.Logs;
-
-  var rows = events.map(function(event) {
-    return headers.map(function(header) {
-      switch (header) {
-        case 'timestamp':
-          return event.timestamp || new Date().toISOString();
-        case 'vk_id':
-          return vkId || event.vk_id || 'anonymous';
-        case 'event_type':
-          return event.event_type || '';
-        case 'event_data':
-          return typeof event.event_data === 'string'
-            ? event.event_data
-            : JSON.stringify(event.event_data !== undefined ? event.event_data : {});
-        case 'page_url':
-          return event.page_url || '';
-        case 'user_agent':
-          return event.user_agent || '';
-        default:
-          // id не используется: строки Logs идентифицируются по времени+vk_id.
-          return '';
-      }
-    });
-  });
-
-  if (rows.length > 0) {
-    sheet
-      .getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length)
-      .setValues(rows);
   // Сериализуем записи в Logs: параллельные запросы без лока вычисляли бы
   // одну и ту же «следующую строку» и затирали друг друга.
   var lock = LockService.getScriptLock();
@@ -775,13 +746,18 @@ function writeLog(vkId, events) {
   }
 }
 
+/**
+ * Ручная/автоматическая отправка лога.
+ * Клиентский автосброс присылает vk_id пользователя; кнопка «Отправить лог»
+ * в админке vk_id не передаёт — запись уходит с vk_id='admin'.
+ */
 function saveManualLog(body) {
   var events = body.log;
   if (!events || !Array.isArray(events) || events.length === 0) {
     throw new Error('log is required and must be a non-empty array');
   }
 
-  writeLog('admin', events);
+  writeLog(body.vk_id || 'admin', events);
   return { saved: true, count: events.length };
 }
 

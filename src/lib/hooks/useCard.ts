@@ -88,37 +88,45 @@ export function useCard(cardId: string) {
    * Основной источник — таблица (Opens/markCardOpen): сервер фиксирует первое
    * время и всегда возвращает его, поэтому у всех устройств пользователя и
    * после переустановок дельта считается от одного и того же момента.
-   * Если сервер недоступен — локальный fallback в localStorage.
+   * Пока ответ сервера не пришёл (или пришла ошибка), используется локальный
+   * fallback — он выставляется мгновенно, чтобы дельта не «сгорела».
    */
   const resolveOpenTime = useCallback(async () => {
     if (!cardId) return;
 
     const key = openTimeKey(cardId);
-    const vkUser = useUserStore.getState().vkUser;
 
-    if (vkUser && !MOCK_MODE) {
-      try {
-        const iso = await sheetsApi.markCardOpen(vkUser.id, cardId);
-        if (iso) {
-          const serverMs = new Date(iso).getTime();
-          if (!Number.isNaN(serverMs)) {
-            // Обновляем локальный fallback свежим серверным значением.
-            setRaw(key, serverMs);
-            setOpenTime(serverMs);
-            return;
-          }
-        }
-      } catch {
-        // Сервер недоступен (нет сети/старый Apps Script) — падаем в fallback ниже.
-      }
-    }
-
+    // Мгновенный локальный ориентир (офлайн/пока летит запрос).
     let stored = getRaw<number>(key);
     if (!stored) {
       stored = Date.now();
       setRaw(key, stored);
     }
     setOpenTime(stored);
+
+    const vkUser = useUserStore.getState().vkUser;
+    if (!vkUser || MOCK_MODE) return;
+
+    try {
+      const iso = await sheetsApi.markCardOpen(vkUser.id, cardId);
+      if (iso) {
+        const serverMs = new Date(iso).getTime();
+        if (!Number.isNaN(serverMs)) {
+          // Серверное значение приоритетно: перезаписываем и состояние,
+          // и локальный fallback.
+          setRaw(key, serverMs);
+          setOpenTime(serverMs);
+        }
+      }
+    } catch (e) {
+      // Не глотаем ошибку молча: без этой записи невозможно понять, почему
+      // лист Opens пуст (нет сети / Apps Script не переиздан и т.п.).
+      await logEvent('api_error', {
+        action: 'markCardOpen',
+        card_id: cardId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }, [cardId]);
 
   useEffect(() => {
@@ -130,6 +138,17 @@ export function useCard(cardId: string) {
     void loadCard();
     void resolveOpenTime();
   }, [cardId, loadCard, resolveOpenTime]);
+
+  /**
+   * Пользователь авторизовался уже ПОСЛЕ открытия карточки (например, зашёл
+   * по прямой ссылке без входа): повторяем markCardOpen, чтобы время попало
+   * в таблицу. Повторный вызов безопасен — сервер идемпотентен.
+   */
+  const vkUserId = useUserStore((state) => state.vkUser?.id ?? '');
+  useEffect(() => {
+    if (!cardId || !vkUserId) return;
+    void resolveOpenTime();
+  }, [cardId, vkUserId, resolveOpenTime]);
 
   const getCardWithStatus = useCallback(async (): Promise<CardWithStatus | null> => {
     if (!card) return null;

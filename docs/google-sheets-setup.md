@@ -35,9 +35,13 @@ Google Sheets работает как база данных. Доступ идё
    - **Users**: vk_id | name | reg_date | subscribed | last_activity
    - **Cards**: card_id | title | release_datetime | post_id | json_schema | is_active
    - **Answers**: id | vk_id | card_id | open_timestamp | submit_timestamp | delta_seconds | user_answer | has_reposted
-   - **Logs**: id | timestamp | vk_id | event_type | event_data | page_url | user_agent
+   - **Logs**: vk_id | timestamp | log (вся пачка событий одной JSON-строкой)
    - **Feedback**: id | timestamp | vk_id | name | card_id | message
    - **Opens**: vk_id | card_id | first_open_timestamp
+
+   Если лист Logs уже существовал со старыми заголовками — переименуйте его
+   в `Logs_archive` и запустите `setupSheets` заново: будет создан лист
+   с актуальными колонками. Старые строки останутся в архиве.
 
 ## Шаг 5. Опубликуйте как веб-приложение
 
