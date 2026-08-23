@@ -235,6 +235,13 @@ export function PropertiesPanel({ block, blocks, blockIndex, onChangeFor }: Prop
           </label>
           <p className="text-xs leading-relaxed text-slate-500">Для маркера нужен включённый просмотр: пользователь перемещает метку именно в полноэкранном режиме.</p>
         </div>
+        <div className="flex flex-col gap-1">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={block.markerImmediateDrag === true} onChange={(e) => updateBlock('markerImmediateDrag', e.target.checked)} />
+            Перемещать метку сразу, без клика
+          </label>
+          <p className="text-xs leading-relaxed text-slate-500">Выкл. — первый тап активирует метку на 3 секунды для перетаскивания (защита от случайных касаний). Вкл. — метка тянется первым же касанием.</p>
+        </div>
 
         <div className="mt-2 border-t border-slate-200 pt-3">
           <h4 className="mb-2 text-xs font-semibold text-slate-600">Настройки правильного ответа</h4>

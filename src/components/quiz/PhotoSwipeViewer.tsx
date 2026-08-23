@@ -33,6 +33,8 @@ interface Props {
   showMarkerCoords?: boolean;
   /** Отключить горизонтальное пролистывание/зацикливание (для одиночных маркерных фото). */
   disableSwipe?: boolean;
+  /** Перемещение метки сразу при перетаскивании, без клика-активации. */
+  immediateDrag?: boolean;
 }
 
 type Dimensions = Record<string, { width: number; height: number }>;
@@ -134,6 +136,7 @@ export function PhotoSwipeViewer({
   onMarkerChange,
   showMarkerCoords = false,
   disableSwipe = false,
+  immediateDrag = false,
 }: Props) {
   const lightboxRef = useRef<PhotoSwipeLightbox | null>(null);
   const pswpRef = useRef<PswpCore | null>(null);
@@ -155,12 +158,14 @@ export function PhotoSwipeViewer({
   const onMarkerChangeRef = useRef(onMarkerChange);
   const showMarkerCoordsRef = useRef(showMarkerCoords);
   const disableSwipeRef = useRef(disableSwipe);
+  const immediateDragRef = useRef(immediateDrag);
 
   markerRef.current = marker;
   onCloseRef.current = onClose;
   onMarkerChangeRef.current = onMarkerChange;
   showMarkerCoordsRef.current = showMarkerCoords;
   disableSwipeRef.current = disableSwipe;
+  immediateDragRef.current = immediateDrag;
 
   /**
    * Обновляет бейдж координат метки в фуллскрине (режим админа).
@@ -421,7 +426,8 @@ export function PhotoSwipeViewer({
           // абсолютные координаты метки должны считаться от viewport.
           appendTo: 'root',
           onInit: (element) => {
-            // Первый тап — окно перемещения (защита от случайных касаний).
+            // Клик-активация окна перемещения — только в кликовом режиме
+            // (в режиме мгновенного перетаскивания метка тянется сразу).
             element.addEventListener('click', (event) => {
               event.stopPropagation();
               if (suppressClickRef.current) {
@@ -429,11 +435,13 @@ export function PhotoSwipeViewer({
                 return;
               }
               if (!markerRef.current || draggingRef.current) return;
+              if (immediateDragRef.current) return;
               armMarker();
             });
-            // Начало перетаскивания доступно только в активном окне.
+            // Начало перетаскивания: мгновенно либо в активном окне (после тапа).
             element.addEventListener('pointerdown', (event) => {
-              if (!armedRef.current || draggingRef.current) return;
+              if (!markerRef.current || draggingRef.current) return;
+              if (!immediateDragRef.current && !armedRef.current) return;
               event.preventDefault();
               event.stopPropagation();
               draggingRef.current = true;

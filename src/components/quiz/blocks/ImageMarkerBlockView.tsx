@@ -138,6 +138,7 @@ export function ImageMarkerBlockView({ block, position, onPositionChange }: Prop
         onMarkerChange={handleMarkerChange}
         showMarkerCoords={isAdmin}
         disableSwipe
+        immediateDrag={block.markerImmediateDrag === true}
       />
     </div>
   );

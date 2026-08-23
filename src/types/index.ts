@@ -144,6 +144,8 @@ export interface ImageMarkerBlock extends BaseBlock {
   errorPercent: number;
   markerColor?: string;
   markerSizePercent?: number;
+  /** Режим перемещения метки: true — перетаскивается сразу, без клика-активации. */
+  markerImmediateDrag?: boolean;
 }
 
 export type Block =
