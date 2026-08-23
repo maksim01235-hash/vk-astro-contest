@@ -51,6 +51,7 @@ function doGet(e) {
       case 'getCard': result = getCard(e.parameter.id); break;
       case 'checkUser': result = checkUser(e.parameter.vk_id, e.parameter.name); break;
       case 'getAnsweredCards': result = getAnsweredCards(e.parameter.vk_id); break;
+      case 'hasAnswered': result = hasUserAnswered(e.parameter.vk_id, e.parameter.card_id); break;
       case 'getStats': result = getStats(); break;
       case 'checkRepost': result = checkRepostViaVK(e.parameter.vk_id, e.parameter.post_id); break;
       case 'getServerTime': result = { iso: new Date().toISOString() }; break;

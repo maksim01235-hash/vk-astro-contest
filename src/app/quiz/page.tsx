@@ -22,7 +22,7 @@ import { useCard } from '@/lib/hooks/useCard';
 import { useRepost } from '@/lib/hooks/useRepost';
 import { useNotification } from '@/lib/hooks/useNotification';
 import { useUserStore } from '@/lib/store/userStore';
-import { sheetsApi } from '@/lib/sheets/api.client';
+import { sheetsApi, isTransportFailure } from '@/lib/sheets/api.client';
 import {
   clearLogBuffer,
   getLogBuffer,
@@ -126,6 +126,27 @@ function QuizContent() {
         toast.success('Ответ уже принят ранее');
         router.push(`/thanks?card=${cardId}`);
         return;
+      }
+
+      // Транспортный сбой (обрыв соединения/таймаут): запись могла пройти,
+      // а подтверждение потеряться на редиректе Apps Script. Проверяем факт.
+      if (isTransportFailure(submitError) && vkUser) {
+        try {
+          const alreadySaved = await sheetsApi.hasAnswered(vkUser.id, cardId);
+          if (alreadySaved) {
+            useUserStore.getState().addAnsweredCardId(cardId);
+            clearLogBuffer();
+            logEvent('api_error', {
+              action: 'saveAnswer',
+              error: `${message} (ответ при этом сохранён)`,
+            });
+            toast.info('Соединение оборвалось, но ответ уже сохранён');
+            router.push(`/thanks?card=${cardId}`);
+            return;
+          }
+        } catch {
+          // Проверка не удалась — показываем обычную ошибку ниже.
+        }
       }
 
       await logEvent('api_error', { action: 'saveAnswer', error: message });

@@ -70,6 +70,7 @@ export const API_ACTIONS = {
   SAVE_FEEDBACK: 'saveFeedback',
   CHECK_USER: 'checkUser',
   GET_ANSWERED_CARDS: 'getAnsweredCards',
+  HAS_ANSWERED: 'hasAnswered',
   SAVE_USER: 'saveUser',
   GET_STATS: 'getStats',
   SAVE_CARD: 'saveCard',

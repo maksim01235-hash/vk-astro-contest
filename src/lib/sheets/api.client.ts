@@ -71,6 +71,15 @@ function parseResponse<T>(raw: unknown): T {
   return typeof raw === 'string' ? JSON.parse(raw) as T : raw as T;
 }
 
+/**
+ * Транспортный сбой: ответ не получен (обрыв соединения, таймаут).
+ * Для мутаций это НЕ значит, что запись не прошла — Apps Script выполняет
+ * запись до редиректа за содержимым ответа, и обрыв может случиться уже после.
+ */
+export function isTransportFailure(error: unknown): boolean {
+  return error instanceof AxiosError && !error.response;
+}
+
 async function get<T>(action: string, params: Record<string, string> = {}): Promise<T> {
   const response = await withRetry(() =>
     client.get('', { params: { action, ...params }, timeout: ACTION_TIMEOUT_MS[action] }),
@@ -152,6 +161,21 @@ export const sheetsApi = {
     return gate(`${API_ACTIONS.GET_ANSWERED_CARDS}:${vkId}`, 'coalesce', async () => {
       const data = await get<string[]>(API_ACTIONS.GET_ANSWERED_CARDS, { vk_id: vkId });
       return data || [];
+    });
+  },
+
+  /**
+   * Отвечал ли пользователь на конкретную карточку.
+   * Используется при транспортном сбое saveAnswer: запись могла пройти,
+   * а подтверждение потеряться на редиректе Apps Script.
+   */
+  hasAnswered(vkId: string, cardId: string): Promise<boolean> {
+    return gate(`${API_ACTIONS.HAS_ANSWERED}:${vkId}:${cardId}`, 'coalesce', async () => {
+      const data = await get<boolean>(API_ACTIONS.HAS_ANSWERED, {
+        vk_id: vkId,
+        card_id: cardId,
+      });
+      return data === true;
     });
   },
 
