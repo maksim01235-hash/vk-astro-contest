@@ -6,7 +6,7 @@
 'use client';
 
 import { Component, ReactNode, ErrorInfo } from 'react';
-import { logEvent } from '@/lib/sheets/logger';
+import { flushLogBufferNow, logEvent } from '@/lib/sheets/logger';
 
 interface Props {
   children: ReactNode;
@@ -25,11 +25,14 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    // Логируем ошибку в таблицу Logs.
+    // Логируем ошибку в таблицу Logs и СРАЗУ отправляем буфер: крашнувшийся
+    // пользователь чаще всего лог больше ни с чем не доставит (ответ не
+    // отправит, фидбэк не напишет).
     logEvent('api_error', {
       error: error.message,
       stack: errorInfo.componentStack,
     });
+    void flushLogBufferNow();
   }
 
   render(): ReactNode {

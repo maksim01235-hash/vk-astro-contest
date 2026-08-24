@@ -1,5 +1,28 @@
 # Журнал изменений агента
 
+## 2026-08-25 — Задача 6 (аудит A3): crash-логи ErrorBoundary доходят до Sheets
+
+**Ветка:** `ai/fix-audit-tasks`
+**Коммит:** см. журнал git (коммит задачи)
+**Статус:** `готово`
+
+### Что сделано
+
+- `logger.ts`: экспортирована `flushLogBufferNow()` — принудительная отправка буфера без порога по размеру (обёртка над flushOverflow; ошибки глотаются с console.warn, single-flight gate защищает от параллельных отправок).
+- `ErrorBoundary.componentDidCatch`: после записи api_error вызывается fire-and-forget flushLogBufferNow — крашнувшийся пользователь больше не теряет краш-лог.
+
+### Изменённые файлы
+
+- `src/lib/sheets/logger.ts`, `src/components/ui/ErrorBoundary.tsx`, `.agent/CHANGELOG.md`
+
+### Проверки
+
+- Запускаются ниже (lint / tsc / build).
+
+### Требует внимания
+
+- Нет.
+
 ## 2026-08-25 — Задача 5 (аудит A2): замок карточек по серверным часам
 
 **Ветка:** `ai/fix-audit-tasks`

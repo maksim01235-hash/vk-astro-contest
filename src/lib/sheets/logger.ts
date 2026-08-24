@@ -104,3 +104,18 @@ async function flushOverflow(): Promise<void> {
 function scheduleAutoFlush(): void {
   void flushOverflow();
 }
+
+/**
+ * Принудительно отправить накопленный буфер логов прямо сейчас (без порога
+ * по размеру). Используется ErrorBoundary: крашнувшийся пользователь чаще
+ * всего больше ничего не сделает — без этого вызова его краш-лог до таблицы
+ * не дойдёт. Ошибки глотаются с console.warn (single-flight gate уже
+ * защищает от гонки параллельных отправок).
+ */
+export async function flushLogBufferNow(): Promise<void> {
+  try {
+    await flushOverflow();
+  } catch (error) {
+    console.warn('[logger] принудительная отправка лога не удалась:', error);
+  }
+}
