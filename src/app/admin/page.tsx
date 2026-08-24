@@ -65,7 +65,15 @@ export default function AdminPage() {
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault(); setAuthChecking(true); setAuthError('');
     try {
-      if (!ADMIN_PASSWORD_HASH || await verifyPassword(password, ADMIN_PASSWORD_HASH)) {
+      // Гейт конфигурации: если секрет NEXT_PUBLIC_ADMIN_PASSWORD_HASH не
+      // задан при сборке, админка НЕ открывается ни с каким паролем
+      // (аналог серверного ADMIN_HASH_NOT_CONFIGURED). Флаг авторизации
+      // в localStorage в этом случае не выставляется.
+      if (!ADMIN_PASSWORD_HASH) {
+        setAuthError('Админка не настроена: задайте NEXT_PUBLIC_ADMIN_PASSWORD_HASH');
+        return;
+      }
+      if (await verifyPassword(password, ADMIN_PASSWORD_HASH)) {
         setAuthed(true); setRaw(STORAGE_ADMIN_AUTH, true); setPassword('');
       } else setAuthError('Неверный пароль');
     } catch { setAuthError('Ошибка проверки пароля'); }
