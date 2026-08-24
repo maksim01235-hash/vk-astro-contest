@@ -33,6 +33,7 @@ import { CardRenderer } from '@/components/quiz/CardRenderer';
 import { RepostModal } from '@/components/quiz/RepostModal';
 import { NotificationModal } from '@/components/quiz/NotificationModal';
 import { deltaSeconds, isReleased } from '@/utils/time';
+import { getServerNowMs } from '@/utils/serverClock';
 import { safeStringify } from '@/utils/json';
 import { getRaw, setRaw } from '@/utils/storage';
 import { STORAGE_OFFLINE_QUEUE } from '@/constants';
@@ -73,12 +74,30 @@ function QuizContent() {
     setSubmitting(true);
 
     try {
-      const submitMs = Date.now();
+      // Момент отправки — по «серверным часам» (смещение измеряется по ответам
+      // API в useCard): локальные часы устройства могут быть смещены, что
+      // искажало дельту вплоть до отрицательных значений. Офлайн-ветка
+      // использует локальные часы — сервер недоступен by design.
+      const submitMs = navigator.onLine ? getServerNowMs() : Date.now();
       const startMs = openTime || submitMs;
 
       // Событие сабмита пишется в буфер до снапшота — лог не бывает пустым.
       await logEvent('card_submit', { card_id: cardId });
       const log = getLogBuffer();
+
+      let delta = deltaSeconds(startMs, submitMs);
+      if (delta < 0) {
+        // Защитный клэмп: отрицательная дельта = рассинхрон часов/данных.
+        // Пишем 0 и различимое событие для диагностики.
+        logEvent('api_error', {
+          action: 'delta_clamped',
+          card_id: cardId,
+          raw_delta_seconds: delta,
+          start_ms: startMs,
+          submit_ms: submitMs,
+        });
+        delta = 0;
+      }
 
       const answer: AnswerRecord & { log?: typeof log } = {
         id: '0',
@@ -86,7 +105,7 @@ function QuizContent() {
         card_id: cardId,
         open_timestamp: new Date(startMs).toISOString(),
         submit_timestamp: new Date(submitMs).toISOString(),
-        delta_seconds: deltaSeconds(startMs, submitMs),
+        delta_seconds: delta,
         user_answer: safeStringify(payload),
         has_reposted: hasRepost,
         log,

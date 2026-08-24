@@ -23,6 +23,7 @@ import {
   STORAGE_OPEN_TIME_PREFIX,
 } from '@/constants';
 import { getWithTTL, setRaw, getRaw } from '@/utils/storage';
+import { noteServerTime } from '@/utils/serverClock';
 import type { CardRecord, CardWithStatus } from '@/types';
 
 function openTimeKey(cardId: string): string {
@@ -122,8 +123,11 @@ export function useCard(cardId: string) {
     if (!vkUser || !HAS_SHEETS_API) return;
 
     try {
+      const startedAt = Date.now();
       const iso = await sheetsApi.markCardOpen(vkUser.id, cardId);
       if (iso) {
+        // Заодно калибруем «серверные часы» устройства для delta_seconds.
+        noteServerTime(iso, startedAt);
         const serverMs = new Date(iso).getTime();
         if (!Number.isNaN(serverMs)) {
           // Серверное значение приоритетно: перезаписываем и состояние,
@@ -192,7 +196,10 @@ export function useCard(cardId: string) {
     let nowIso = serverTime;
     if (!nowIso) {
       try {
+        const startedAt = Date.now();
         nowIso = await sheetsApi.getServerTime();
+        // Калибровка серверных часов (используется при расчёте delta_seconds).
+        noteServerTime(nowIso, startedAt);
         setServerTime(nowIso);
       } catch {
         nowIso = new Date().toISOString();
