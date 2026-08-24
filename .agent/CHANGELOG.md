@@ -1,5 +1,29 @@
 # Журнал изменений агента
 
+## 2026-08-25 — Задача 8 (аудит A5/A8): инфраструктура
+
+**Ветка:** `ai/fix-audit-tasks`
+**Коммит:** см. журнал git (коммит задачи)
+**Статус:** `готово`
+
+### Что сделано
+
+- Удалены мёртвые зависимости (нулевые импорты, проверено grep): react-hook-form, @hookform/resolvers, zod, localforage; package-lock.json перегенерирован (npm install).
+- deploy.yml: npm install → npm ci (воспроизводимая сборка). Изменение CI — по прямому указанию в TASKS.md.
+- fetchReposters: пагинация wall.getReposts циклом по response.next_from (до 1000 за вызов) — у постов с >1000 репостов больше не теряется «хвост»; отсутствие поля корректно завершает цикл.
+
+### Изменённые файлы
+
+- `package.json`, `package-lock.json`, `.github/workflows/deploy.yml`, `apps-script/Code.gs`, `.agent/CHANGELOG.md`
+
+### Проверки
+
+- lint / tsc / build ниже + `npm ls react-hook-form zod localforage @hookform/resolvers` должен быть пуст.
+
+### Требует внимания
+
+- Нет.
+
 ## 2026-08-25 — Задача 9 (аудит A6): сиротские строки Answers не перезаписываются
 
 **Ветка:** `ai/fix-audit-tasks`

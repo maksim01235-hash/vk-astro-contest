@@ -966,32 +966,46 @@ function getWallToken() {
 }
 
 /**
- * Один вызов wall.getReposts → множество id репостнувших.
+ * Один пост → множество id репостнувших, с пагинацией: wall.getReposts
+ * отдаёт максимум 1000 записей за вызов; пока в ответе есть next_from —
+ * запрашиваем следующую страницу и объединяем множества (аудит A5:
+ * у постов с >1000 репостов «хвост» терялся → ложные has_reposted=false).
  * Ошибка VK прокидывается наверх с кодом:
  * 'wall.getReposts[15]: Access denied…' — видна в тосте админки и логах.
  */
 function fetchReposters(ownerId, token, postId) {
-  var response = UrlFetchApp.fetch(
-    'https://api.vk.com/method/wall.getReposts?' + serializeParams({
+  var ids = {};
+  var nextFrom = '';
+
+  do {
+    var params = {
       owner_id: ownerId,
       post_id: postId,
       count: 1000,
       v: '5.199',
       access_token: token,
-    }),
-  );
+    };
+    if (nextFrom) params.next_from = nextFrom;
 
-  var data = JSON.parse(response.getContentText());
-  if (data.error) {
-    throw new Error(
-      'wall.getReposts[' + data.error.error_code + ']: ' + data.error.error_msg,
+    var response = UrlFetchApp.fetch(
+      'https://api.vk.com/method/wall.getReposts?' + serializeParams(params),
     );
-  }
 
-  var ids = {};
-  ((data.response && data.response.items) || []).forEach(function(item) {
-    ids[String(item.from_id)] = true;
-  });
+    var data = JSON.parse(response.getContentText());
+    if (data.error) {
+      throw new Error(
+        'wall.getReposts[' + data.error.error_code + ']: ' + data.error.error_msg,
+      );
+    }
+
+    ((data.response && data.response.items) || []).forEach(function(item) {
+      ids[String(item.from_id)] = true;
+    });
+
+    // Отсутствие поля — корректный признак последней страницы.
+    nextFrom = (data.response && data.response.next_from) || '';
+  } while (nextFrom);
+
   return ids;
 }
 
