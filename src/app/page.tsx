@@ -100,15 +100,21 @@ export default function HomePage() {
             const isCompleted = status === 'completed';
             const isLocked = status === 'locked';
             return (
-              <div key={card.card_id} className="card-surface flex items-center justify-between gap-4 hover:shadow-md" style={{ animationDelay: `${i * 50}ms` }}>
+              // Плавная раскладка без брейкпоинтов: пока хватает места — один
+              // ряд, где кнопка/бейдж прижаты к правому краю (flex-1 у текста
+              // съедает свободное пространство); когда тексту тесно — они
+              // переносятся строкой ниже под текст слева. Защита от наложения
+              // непереносимых слов при сжатии: break-words + line-clamp у
+              // заголовка, truncate у даты, whitespace-nowrap у бейджа и кнопки.
+              <div key={card.card_id} className="card-surface flex flex-wrap items-center gap-x-4 gap-y-2 hover:shadow-md" style={{ animationDelay: `${i * 50}ms` }}>
                 <div className="min-w-0 flex-1">
-                  <h3 className="mb-1 font-semibold text-slate-900">{card.title}</h3>
-                  <p className="text-sm text-slate-500">{isLocked ? `Откроется: ${formatDate(card.release_datetime)}` : `Опубликована: ${formatDate(card.release_datetime)}`}</p>
+                  <h3 className="mb-1 break-words font-semibold text-slate-900 line-clamp-2">{card.title}</h3>
+                  <p className="truncate text-sm text-slate-500">{isLocked ? `Откроется: ${formatDate(card.release_datetime)}` : `Опубликована: ${formatDate(card.release_datetime)}`}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {isCompleted && <span className="inline-flex min-h-[46px] items-center text-sm font-medium text-green-600">Выполнено</span>}
+                <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+                  {isCompleted && <span className="inline-flex min-h-[46px] items-center whitespace-nowrap text-sm font-medium text-green-600">Выполнено</span>}
                   {isLocked && <span className="text-2xl">🔒</span>}
-                  {!isLocked && <Link href={isCompleted ? `/thanks?card=${card.card_id}` : `/quiz?id=${card.card_id}`} className="btn-secondary text-sm">{isCompleted ? 'Результат' : 'Открыть'}</Link>}
+                  {!isLocked && <Link href={isCompleted ? `/thanks?card=${card.card_id}` : `/quiz?id=${card.card_id}`} className="btn-secondary whitespace-nowrap text-sm">{isCompleted ? 'Результат' : 'Открыть'}</Link>}
                 </div>
               </div>
             );
