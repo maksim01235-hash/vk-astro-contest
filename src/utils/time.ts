@@ -2,6 +2,8 @@
  * utils/time.ts — хелперы для работы со временем.
  */
 
+import { getServerNowMs } from '@/utils/serverClock';
+
 /**
  * Возвращает текущий timestamp в миллисекундах.
  */
@@ -27,13 +29,17 @@ export function deltaSeconds(startMs: number, endMs: number): number {
 }
 
 /**
- * Проверяет, наступила ли дата release_datetime (сравнение с текущим временем).
+ * Проверяет, наступила ли дата release_datetime.
+ * База времени — «серверные часы» (offset измеряется по ответам API в
+ * utils/serverClock): у устройств со смещёнными часами карточки открывались
+ * не вовремя (аудит A2). До первого измерения offset getServerNowMs()
+ * возвращает локальное время — прежнее поведение сохраняется.
  * @param releaseISO — ISO-строка даты публикации
- * @returns true, если карточка доступна (текущее время >= release)
+ * @returns true, если карточка доступна
  */
 export function isReleased(releaseISO: string): boolean {
   const release = new Date(releaseISO).getTime();
-  return Date.now() >= release;
+  return getServerNowMs() >= release;
 }
 
 /**
