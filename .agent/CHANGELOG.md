@@ -1,5 +1,31 @@
 # Журнал изменений агента
 
+## 2026-08-24 — Задача 2: попап уведомлений скрыт на десктопе + глобальный флаг
+
+**Ветка:** `ai/fix-delta-reposts-notifications`
+**Коммит:** ещё не создан
+**Статус:** `готова`
+
+### Что сделано
+
+- `useNotification`: попап не показывается на desktop_web (vk_platform из query запуска мини-аппа) — для немодерированных приложений запрос там всегда падает с client_error code 6.
+- Новая переменная `NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP` (true/1) полностью запрещает попап на всех платформах: константа в constants, проверка в useNotification, упоминание в README (Шаг 5 + список секретов деплоя) и env-строка в `.github/workflows/deploy.yml`.
+- Обработка ошибок bridge не менялась (сериализация error_type/error_data сохранена); поведение при отказе пользователя прежнее.
+
+### Изменённые файлы
+
+- `src/constants/index.ts` — DISABLE_NOTIFICATION_POPUP
+- `src/lib/hooks/useNotification.ts` — isDesktopWeb + shouldSuppressPopup в checkShouldShow/showAfterSubmit
+- `README.md`, `.github/workflows/deploy.yml` — документирование новой переменной
+
+### Проверки
+
+- Запускаются ниже (lint / tsc / build).
+
+### Требует внимания
+
+- Чтобы отключить попап в продакшене, добавить секрет NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP=true в GitHub (необязательно — на десктопе он теперь скрыт и без флага).
+
 ## 2026-08-24 — Задача 3: репосты без модалки, тихая проверка + полная перепроверка
 
 **Ветка:** `ai/fix-delta-reposts-notifications`

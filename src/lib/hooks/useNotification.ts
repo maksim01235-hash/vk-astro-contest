@@ -20,10 +20,31 @@ import { requestNotifications } from '@/lib/vk/bridge';
 import { sheetsApi } from '@/lib/sheets/api.client';
 import { logEvent } from '@/lib/sheets/logger';
 import { useUserStore } from '@/lib/store/userStore';
-import { STORAGE_NOTIF_DISMISSED } from '@/constants';
+import { DISABLE_NOTIFICATION_POPUP, STORAGE_NOTIF_DISMISSED } from '@/constants';
 import { getRaw, setRaw } from '@/utils/storage';
 import { nowISO } from '@/utils/time';
 import type { UserRecord } from '@/types';
+
+/**
+ * Десктопная веб-версия VK: для немодерированных приложений запрос
+ * VKWebAppAllowNotifications там всегда падает с client_error code 6
+ * («Unsupported platform»), модерацию проводить не будут — попап скрыаем.
+ * Платформу VK передаёт в query при запуске мини-аппа (vk_platform=desktop_web);
+ * basePath в URL не мешает разбору.
+ */
+function isDesktopWeb(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get('vk_platform') === 'desktop_web';
+  } catch {
+    return false;
+  }
+}
+
+/** Показ попапа запрещён глобальным флагом или на десктопе. */
+function shouldSuppressPopup(): boolean {
+  if (DISABLE_NOTIFICATION_POPUP) return true;
+  return isDesktopWeb();
+}
 
 /** Безопасно извлечь полезные поля из неизвестной ошибки VK Bridge. */
 function serializeBridgeError(error: unknown): Record<string, unknown> {
@@ -56,6 +77,7 @@ export function useNotification() {
   /** Попап показываем, пока пользователь не подписан и не закрыл его раньше. */
   const checkShouldShow = useCallback(() => {
     if (!vkUser) return;
+    if (shouldSuppressPopup()) return;
 
     if (getRaw<boolean>(STORAGE_NOTIF_DISMISSED)) return;
     if (userRecord?.subscribed) return;
@@ -66,6 +88,7 @@ export function useNotification() {
   /** Показать попап после отправки ответа (страница /thanks). */
   const showAfterSubmit = useCallback(() => {
     if (!vkUser) return;
+    if (shouldSuppressPopup()) return;
 
     if (getRaw<boolean>(STORAGE_NOTIF_DISMISSED)) return;
     if (userRecord?.subscribed) return;

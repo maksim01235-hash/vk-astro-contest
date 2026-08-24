@@ -62,6 +62,15 @@ export const STORAGE_ADMIN_AUTH = `${STORAGE_PREFIX}admin_authed`;
 
 export const VK_APP_ID = process.env.NEXT_PUBLIC_VK_APP_ID || '';
 
+/**
+ * Полное отключение попапа уведомлений (NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP
+ * = true|1): попап не показывается ни на одной платформе. Для немодерированных
+ * приложений VK не даёт разрешения на desktop_web — см. useNotification.
+ */
+export const DISABLE_NOTIFICATION_POPUP =
+  process.env.NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP === 'true' ||
+  process.env.NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP === '1';
+
 export const API_ACTIONS = {
   GET_CARDS: 'getCards',
   GET_CARDS_LIST: 'getCardsList',

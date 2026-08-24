@@ -74,6 +74,7 @@ npm install
    NEXT_PUBLIC_ADMIN_PASSWORD_HASH=<SHA-256 хеш пароля>
    NEXT_PUBLIC_BASE_PATH=/vk-astro-contest
    NEXT_PUBLIC_MOCK_MODE=false
+   NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP=true   # опционально: полностью скрыть попап уведомлений
    ```
 
 ### Шаг 6. Запустите локально
@@ -139,6 +140,7 @@ NEXT_PUBLIC_MOCK_MODE=true npm run dev
    - `NEXT_PUBLIC_BASE_PATH` — путь репозитория (например, `/vk-astro-contest`)
    - `NEXT_PUBLIC_MOCK_MODE` — `false`
    - `NEXT_PUBLIC_VK_APP_ID` — ID приложения VK
+   - `NEXT_PUBLIC_DISABLE_NOTIFICATION_POPUP` — `true`, чтобы полностью отключить попап уведомлений (необязательно; на desktop_web он и так скрыт)
 5. При пуше в main — автоматически соберётся и опубликуется.
 6. Сайт будет на `https://ВАШ_НИК.github.io/vk-astro-contest/`.
 
