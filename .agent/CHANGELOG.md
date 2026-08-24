@@ -1,5 +1,41 @@
 # Журнал изменений агента
 
+## 2026-08-24 — Задача 3: репосты без модалки, тихая проверка + полная перепроверка
+
+**Ветка:** `ai/fix-delta-reposts-notifications`
+**Коммит:** ещё не создан
+**Статус:** `готова`
+
+### Что сделано
+
+- Удалены `RepostModal` и хук `useRepost`: модалка с побуждением к репосту убрана из потока целиком (решение владельца). `uiStore` оставлен — используется NotificationModal.
+- Тихая проверка при отправке: в `handleSubmit` один вызов `checkRepost`, результат — в `answer.has_reposted`; офлайн/без post_id → false. Сбой проверки не блокирует ответ: `repost_fail reason=check_failed`; незаданный токен на сервере теперь различим (`REPOST_CHECK_NOT_CONFIGURED`) и пишется как `repost_check_unconfigured` один раз за сессию.
+- Полная перепроверка: серверная функция `refreshReposts(passwordHash)` (проверка SHA-256 против Script Property ADMIN_PASSWORD_HASH, wall.getReposts по уникальным постам, точечное обновление только изменившихся ячеек под LockService) + POST-экшен; клиентский метод с таймаутом 30 c; кнопка «Перепроверить репосты» на /admin/stats с явным вводом пароля (не хранится).
+- docs/google-sheets-setup.md: шаг 6 помечен обязательным для боевого режима, добавлен ADMIN_PASSWORD_HASH.
+
+### Изменённые файлы
+
+- `apps-script/Code.gs` — маркер REPOST_CHECK_NOT_CONFIGURED, refreshReposts + doPost-экшен
+- `src/constants/index.ts` — REFRESH_REPOSTS
+- `src/types/index.ts` — RepostRefreshSummary
+- `src/lib/sheets/api.client.ts` — refreshReposts(), таймаут 30 c
+- `src/components/admin/RefreshRepostsButton.tsx` — новый компонент
+- `src/app/admin/stats/page.tsx` — кнопка в обеих шапках
+- `src/app/quiz/page.tsx` — удалена модалка/хук, тихая проверка
+- `src/components/quiz/RepostModal.tsx`, `src/lib/hooks/useRepost.ts` — удалены
+- `docs/google-sheets-setup.md`, `.agent/CHANGELOG.md`
+
+### Проверки
+
+- `npm run lint` — успешно (только ранее существовавшие предупреждения)
+- `npx tsc --noEmit` — успешно
+- `npm run build` — успешно
+
+### Требует внимания
+
+- Для работы проверки/перепроверки задать Script Properties: VK_SERVICE_TOKEN, VK_OWNER_ID, ADMIN_PASSWORD_HASH; переиздать веб-приложение.
+- Пароль админки запрашивается при каждом запуске перепроверки намеренно.
+
 ## 2026-08-24 — Задача 1: корректная delta_seconds при рассинхроне часов
 
 **Ветка:** `ai/fix-delta-reposts-notifications`

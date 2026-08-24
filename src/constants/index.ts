@@ -79,6 +79,7 @@ export const API_ACTIONS = {
   SYNC_OFFLINE: 'syncOffline',
   SAVE_MANUAL_LOG: 'saveManualLog',
   MARK_CARD_OPEN: 'markCardOpen',
+  REFRESH_REPOSTS: 'refreshReposts',
 } as const;
 
 export type ApiAction = (typeof API_ACTIONS)[keyof typeof API_ACTIONS];

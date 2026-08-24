@@ -24,6 +24,7 @@ import type {
   CardRecord,
   CardStat,
   LogRecord,
+  RepostRefreshSummary,
   UserRecord,
 } from '@/types';
 
@@ -32,6 +33,7 @@ const ACTION_TIMEOUT_MS: Record<string, number> = {
   [API_ACTIONS.GET_STATS]: 30000,
   [API_ACTIONS.SYNC_OFFLINE]: 30000,
   [API_ACTIONS.SAVE_CARD]: 30000,
+  [API_ACTIONS.REFRESH_REPOSTS]: 30000,
 };
 
 const BUSY_MESSAGE = 'Предыдущий запрос ещё выполняется';
@@ -240,6 +242,16 @@ export const sheetsApi = {
         vk_id: vkId,
         post_id: postId,
       }),
+    );
+  },
+
+  /**
+   * Полная перепроверка репостов по всем карточкам (админка).
+   * @param passwordHash — SHA-256 хеш пароля админки (считается на клиенте).
+   */
+  refreshReposts(passwordHash: string): Promise<RepostRefreshSummary> {
+    return gate(API_ACTIONS.REFRESH_REPOSTS, 'single', () =>
+      post<RepostRefreshSummary>(API_ACTIONS.REFRESH_REPOSTS, { passwordHash }),
     );
   },
 

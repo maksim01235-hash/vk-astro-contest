@@ -199,7 +199,7 @@ export interface ApiResponse<T = unknown> {
   error?: string;
 }
 
-export interface CardStat {
+export type CardStat = {
   card_id: string;
   title: string;
   total_answers: number;
@@ -211,6 +211,16 @@ export interface CardStat {
   min_delta: number;
   max_delta: number;
   reposted_count: number;
+};
+
+/** Сводка полной перепроверки репостов (refreshReposts). */
+export interface RepostRefreshSummary {
+  /** Сколько строк Answers проверено. */
+  checked: number;
+  /** Сколько ячеек has_reposted изменено. */
+  updated: number;
+  /** По каждому посту: сколько фактических репостов найдено. */
+  posts: Array<{ post_id: string; reposts: number }>;
 }
 
 export type EventType =

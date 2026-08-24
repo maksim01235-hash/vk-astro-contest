@@ -25,6 +25,7 @@ import { sheetsApi } from '@/lib/sheets/api.client';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { AdminLogButton } from '@/components/admin/AdminLogButton';
+import { RefreshRepostsButton } from '@/components/admin/RefreshRepostsButton';
 import { STORAGE_ADMIN_AUTH } from '@/constants';
 import { getRaw } from '@/utils/storage';
 import type { CardStat } from '@/types';
@@ -86,7 +87,10 @@ export default function StatsPage() {
       <div className="animate-fade-in">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-slate-900">Статистика</h1>
-          <AdminLogButton page="admin/stats" />
+          <div className="flex items-center gap-2">
+            <AdminLogButton page="admin/stats" />
+            <RefreshRepostsButton />
+          </div>
         </div>
         <div className="card-surface text-center text-slate-500">
           Пока нет данных. Ответы появятся после участия пользователей.
@@ -121,6 +125,7 @@ export default function StatsPage() {
         <h1 className="text-2xl font-bold text-slate-900">Статистика</h1>
         <div className="flex items-center gap-2">
           <AdminLogButton page="admin/stats" />
+          <RefreshRepostsButton />
           <Link href="/admin" className="btn-secondary text-sm">← К конструктору</Link>
         </div>
       </div>

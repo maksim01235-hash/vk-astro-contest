@@ -19,7 +19,6 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCard } from '@/lib/hooks/useCard';
-import { useRepost } from '@/lib/hooks/useRepost';
 import { useNotification } from '@/lib/hooks/useNotification';
 import { useUserStore } from '@/lib/store/userStore';
 import { sheetsApi, isTransportFailure } from '@/lib/sheets/api.client';
@@ -30,7 +29,6 @@ import {
 } from '@/lib/sheets/logger';
 import { useToast } from '@/components/ui/Toast';
 import { CardRenderer } from '@/components/quiz/CardRenderer';
-import { RepostModal } from '@/components/quiz/RepostModal';
 import { NotificationModal } from '@/components/quiz/NotificationModal';
 import { deltaSeconds, isReleased } from '@/utils/time';
 import { getServerNowMs } from '@/utils/serverClock';
@@ -38,6 +36,9 @@ import { safeStringify } from '@/utils/json';
 import { getRaw, setRaw } from '@/utils/storage';
 import { STORAGE_OFFLINE_QUEUE } from '@/constants';
 import type { AnswerPayload, AnswerRecord } from '@/types';
+
+/** «repost_check_unconfigured» пишется один раз за сессию страницы. */
+let repostUnconfiguredLogged = false;
 
 function QuizContent() {
   const searchParams = useSearchParams();
@@ -50,15 +51,7 @@ function QuizContent() {
   const toast = useToast();
 
   const [submitting, setSubmitting] = useState(false);
-  const [showRepostModal, setShowRepostModal] = useState(false);
-  const repostCheckStarted = useRef(false);
   const cardOpenLoggedRef = useRef('');
-
-  const { hasRepost, check, doRepost, posting } = useRepost(
-    cardId,
-    card?.post_id || '',
-    vkUser?.id || '',
-  );
 
   const {
     showPopup: showNotifPopup,
@@ -99,6 +92,36 @@ function QuizContent() {
         delta = 0;
       }
 
+      // Тихая проверка факта репоста (без модалок и побуждений): один запрос,
+      // результат пишется в answer.has_reposted. Сбой проверки не блокирует
+      // отправку — фиксируем причину в логе и считаем репост отсутствующим.
+      let hasReposted = false;
+      if (navigator.onLine && card.post_id) {
+        try {
+          hasReposted = await sheetsApi.checkRepost(vkUser.id, String(card.post_id));
+        } catch (checkError) {
+          const reason = checkError instanceof Error ? checkError.message : String(checkError);
+          if (reason.includes('REPOST_CHECK_NOT_CONFIGURED')) {
+            // Сервис-токен/owner не заданы на сервере: проверки фактически
+            // отключены. Пишем различимое событие один раз за сессию.
+            if (!repostUnconfiguredLogged) {
+              repostUnconfiguredLogged = true;
+              logEvent('repost_check_unconfigured', {
+                card_id: cardId,
+                hint: 'set VK_SERVICE_TOKEN and VK_OWNER_ID in Apps Script properties',
+              });
+            }
+          } else {
+            logEvent('repost_fail', {
+              card_id: cardId,
+              post_id: String(card.post_id),
+              reason: 'check_failed',
+              error: reason,
+            });
+          }
+        }
+      }
+
       const answer: AnswerRecord & { log?: typeof log } = {
         id: '0',
         vk_id: vkUser.id,
@@ -107,7 +130,7 @@ function QuizContent() {
         submit_timestamp: new Date(submitMs).toISOString(),
         delta_seconds: delta,
         user_answer: safeStringify(payload),
-        has_reposted: hasRepost,
+        has_reposted: hasReposted,
         log,
       };
 
@@ -173,26 +196,7 @@ function QuizContent() {
     } finally {
       setSubmitting(false);
     }
-  }, [card, cardId, hasRepost, openTime, router, submitting, toast, vkUser]);
-
-  /** Проверить репост после успешной загрузки карточки. */
-  const handleCardReady = useCallback(async () => {
-    if (repostCheckStarted.current || !card || !vkUser || hasRepost) return;
-
-    repostCheckStarted.current = true;
-    const reposted = await check();
-
-    if (!reposted) {
-      setShowRepostModal(true);
-      await logEvent('modal_open', { type: 'repost', card_id: cardId });
-    }
-  }, [card, cardId, check, hasRepost, vkUser]);
-
-  useEffect(() => {
-    if (card && !loading) {
-      void handleCardReady();
-    }
-  }, [card, handleCardReady, loading]);
+  }, [card, cardId, openTime, router, submitting, toast, vkUser]);
 
   /** Зафиксировать открытие карточки в буфере лога — один раз на карточку. */
   useEffect(() => {
@@ -269,15 +273,6 @@ function QuizContent() {
         jsonSchema={card.json_schema}
         onSubmit={handleSubmit}
         submitting={submitting}
-      />
-      <RepostModal
-        open={showRepostModal}
-        onClose={() => setShowRepostModal(false)}
-        onRepost={async () => {
-          const ok = await doRepost();
-          if (ok) setShowRepostModal(false);
-        }}
-        posting={posting}
       />
       <NotificationModal
         open={showNotifPopup}

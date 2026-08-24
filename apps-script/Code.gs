@@ -81,6 +81,7 @@ function doPost(e) {
       case 'saveCard': result = saveCard(body); break;
       case 'syncOffline': result = syncOffline(body); break;
       case 'saveManualLog': result = saveManualLog(body); break;
+      case 'refreshReposts': result = refreshReposts(body.passwordHash); break;
       default: return jsonOut({ ok: false, error: 'Unknown action: ' + action });
     }
 
@@ -936,8 +937,9 @@ function checkRepostViaVK(vkId, postId) {
   var token = props.getProperty('VK_SERVICE_TOKEN');
   var ownerId = props.getProperty('VK_OWNER_ID');
 
-  if (!token) throw new Error('VK_SERVICE_TOKEN not set in Script Properties');
-  if (!ownerId) throw new Error('VK_OWNER_ID not set in Script Properties');
+  // Единый различимый маркер «проверка не настроена»: клиент пишет событие
+  // repost_check_unconfigured вместо немого false.
+  if (!token || !ownerId) throw new Error('REPOST_CHECK_NOT_CONFIGURED');
 
   var response = UrlFetchApp.fetch(
     'https://api.vk.com/method/wall.getReposts?' + serializeParams({
@@ -962,6 +964,116 @@ function serializeParams(obj) {
   return Object.keys(obj).map(function(key) {
     return encodeURIComponent(key) + '=' + encodeURIComponent(obj[key]);
   }).join('&');
+}
+
+// ============================================================
+// Reposts refresh — полная перепроверка по вызову из админки
+// ============================================================
+
+/**
+ * Пересчитывает Answers.has_reposted по факту: пользователь мог репостнуть
+ * позже отправки ответа. Для каждого уникального post_id из Cards делается
+ * один вызов wall.getReposts, затем обновляются ТОЛЬКО изменившиеся ячейки.
+ *
+ * Доступ: клиент шлёт SHA-256 хеш пароля админки; сервер сравнивает его со
+ * Script Property ADMIN_PASSWORD_HASH (тот же хеш, что в
+ * NEXT_PUBLIC_ADMIN_PASSWORD_HASH фронтенда). Это защита от случайного
+ * доступа — осознанное решение проекта.
+ *
+ * Ошибки:
+ *  - ADMIN_HASH_NOT_CONFIGURED — задайте свойство ADMIN_PASSWORD_HASH;
+ *  - FORBIDDEN — неверный пароль;
+ *  - REPOST_CHECK_NOT_CONFIGURED — не заданы VK_SERVICE_TOKEN/VK_OWNER_ID.
+ *
+ * @param {string} passwordHash - hex SHA-256 пароля (считается на клиенте)
+ * @returns {Object} { checked, updated, posts: [{post_id, reposts}] }
+ */
+function refreshReposts(passwordHash) {
+  var props = PropertiesService.getScriptProperties();
+  var expectedHash = props.getProperty('ADMIN_PASSWORD_HASH');
+  if (!expectedHash) throw new Error('ADMIN_HASH_NOT_CONFIGURED');
+  if (!passwordHash || String(passwordHash).toLowerCase() !== String(expectedHash).toLowerCase()) {
+    throw new Error('FORBIDDEN');
+  }
+
+  var token = props.getProperty('VK_SERVICE_TOKEN');
+  var ownerId = props.getProperty('VK_OWNER_ID');
+  if (!token || !ownerId) throw new Error('REPOST_CHECK_NOT_CONFIGURED');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // card_id -> post_id и множество уникальных постов конкурса.
+    var cardToPost = {};
+    var posts = {};
+    readSheet(SHEET_CARDS).forEach(function(card) {
+      var pid = String(card.post_id || '').trim();
+      if (!pid) return;
+      posts[pid] = true;
+      cardToPost[String(card.card_id)] = pid;
+    });
+
+    // Репостнувшие по каждому посту: один вызов wall.getReposts на пост.
+    var repostersByPost = {};
+    var postsSummary = [];
+    Object.keys(posts).forEach(function(postId) {
+      var ids = {};
+      try {
+        var response = UrlFetchApp.fetch(
+          'https://api.vk.com/method/wall.getReposts?' + serializeParams({
+            owner_id: ownerId,
+            post_id: postId,
+            count: 1000,
+            v: '5.199',
+            access_token: token,
+          }),
+        );
+        var data = JSON.parse(response.getContentText());
+        if (data.error) {
+          Logger.log('wall.getReposts(' + postId + ') error: ' + data.error.error_msg);
+        } else {
+          ((data.response && data.response.items) || []).forEach(function(item) {
+            ids[String(item.from_id)] = true;
+          });
+        }
+      } catch (error) {
+        Logger.log('wall.getReposts(' + postId + ') failed: ' + String(error));
+      }
+      repostersByPost[postId] = ids;
+      postsSummary.push({ post_id: postId, reposts: Object.keys(ids).length });
+    });
+
+    // Точечное обновление только изменившихся ячеек has_reposted.
+    var sheet = getSheet(SHEET_ANSWERS);
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { checked: 0, updated: 0, posts: postsSummary };
+
+    var headers = data[0];
+    var vkCol = headers.indexOf('vk_id');
+    var cardCol = headers.indexOf('card_id');
+    var repostCol = headers.indexOf('has_reposted');
+    if (vkCol === -1 || cardCol === -1 || repostCol === -1) {
+      throw new Error('Answers sheet has unexpected columns');
+    }
+
+    var updated = 0;
+    for (var i = 1; i < data.length; i++) {
+      var postId = cardToPost[String(data[i][cardCol])];
+      var expected = postId ? repostersByPost[postId][String(data[i][vkCol])] === true : false;
+
+      var current = data[i][repostCol];
+      var currentBool = current === true || current === 'TRUE' || current === 'true';
+
+      if (currentBool !== expected) {
+        sheet.getRange(i + 1, repostCol + 1).setValue(expected);
+        updated += 1;
+      }
+    }
+
+    return { checked: data.length - 1, updated: updated, posts: postsSummary };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ============================================================
