@@ -1,1 +1,0 @@
-vk-miniapps-deploy

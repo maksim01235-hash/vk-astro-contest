@@ -36,7 +36,7 @@ next-env.d.ts
 .idea/
 .vscode/
 
+#Логи
+/logs
+
 # OpenCode
-agent-changes.patch
-AGENTS.md
-opencode.json
