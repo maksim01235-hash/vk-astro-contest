@@ -108,7 +108,7 @@ function QuizContent() {
               repostUnconfiguredLogged = true;
               logEvent('repost_check_unconfigured', {
                 card_id: cardId,
-                hint: 'set VK_SERVICE_TOKEN and VK_OWNER_ID in Apps Script properties',
+                hint: 'set VK_USER_TOKEN and VK_OWNER_ID in Apps Script properties',
               });
             }
           } else {

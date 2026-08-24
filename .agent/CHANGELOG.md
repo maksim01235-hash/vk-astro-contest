@@ -1,5 +1,29 @@
 # Журнал изменений агента
 
+## 2026-08-25 — Задача 7 (аудит A7): мелкие кодовые исправления
+
+**Ветка:** `ai/fix-audit-tasks`
+**Коммит:** см. журнал git (коммит задачи)
+**Статус:** `готово`
+
+### Что сделано
+
+- Подсказка события repost_check_unconfigured обновлена: «set VK_USER_TOKEN and VK_OWNER_ID» (сервисный токен не подходит — error 15).
+- CardRenderer: при смене json_schema (другая карточка без размонтирования) сбрасываются inputsRef/dndRef/markerMovedRef и позиция метки — ответы больше не наследуются между карточками.
+- Code.gs: у вложенного writeLog внутри saveAnswer добавлен комментарий о реентерабельности LockService в рамках одного исполнения и опасности разнесения функций.
+
+### Изменённые файлы
+
+- `src/app/quiz/page.tsx`, `src/components/quiz/CardRenderer.tsx`, `apps-script/Code.gs`, `.agent/CHANGELOG.md`
+
+### Проверки
+
+- Запускаются ниже (lint / tsc / build).
+
+### Требует внимания
+
+- Нет.
+
 ## 2026-08-25 — Задача 6 (аудит A3): crash-логи ErrorBoundary доходят до Sheets
 
 **Ветка:** `ai/fix-audit-tasks`

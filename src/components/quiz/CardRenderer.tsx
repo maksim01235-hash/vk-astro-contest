@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Block, CardSchema, DnDState, AnswerPayload } from '@/types';
 import { TextBlockView } from './blocks/TextBlock';
 import { ImageBlockView } from './blocks/ImageBlock';
@@ -39,6 +39,16 @@ export function CardRenderer({ jsonSchema, onSubmit, submitting }: CardRendererP
   const handleDndStateChange = useCallback((state: DnDState) => {
     dndRef.current = state;
   }, []);
+
+  // При смене карточки без размонтирования страницы (другой ?id= в той же
+  // сессии) состояние ответа не должно наследоваться: сбрасываем inputs/dnd
+  // и позицию метки на дефисную.
+  useEffect(() => {
+    inputsRef.current = {};
+    dndRef.current = {};
+    markerMovedRef.current = false;
+    setMarkerPos({ x: 50, y: 50 });
+  }, [jsonSchema]);
 
   const handleMarkerChange = useCallback((position: MarkerPosition) => {
     markerMovedRef.current = true;

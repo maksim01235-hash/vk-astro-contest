@@ -675,6 +675,11 @@ function saveAnswer(answer) {
     });
 
     if (answer.log && Array.isArray(answer.log) && answer.log.length > 0) {
+      // ВНИМАНИЕ: вложенный LockService. saveAnswer уже держит script-lock;
+      // повторный захват тем же исполнением разрешён (реентерабельность),
+      // поэтому это работает. Паттерн хрупкий: если разнести saveAnswer и
+      // writeLog по разным исполнениям/триггерам — возможен deadlock.
+      // При рефакторинге держите их в одном контексте исполнения.
       writeLog(answer.vk_id, answer.log);
     }
 
