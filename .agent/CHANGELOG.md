@@ -1,5 +1,33 @@
 # Журнал изменений агента
 
+## 2026-08-24 — Правка: репосты через user-токен (VK error 15) + защита от затирания
+
+**Ветка:** `ai/fix-reposts-user-token`
+**Коммит:** ещё не создан
+**Статус:** `готова`
+
+### Что сделано
+
+- Корневая причина «0 репостов» подтверждена владельцем: wall.getReposts требует права wall, которого нет у сервисного токена → VK отвечает error 15.
+- Code.gs: новый `getWallToken()` — берёт Script Property VK_USER_TOKEN; при наличии только сервисного токена выбрасывает различимое REPOST_TOKEN_REQUIRED (fallback на сервисный сознательно убран, чтобы не получать немые нули). Общий хелпер `fetchReposters()` пробрасывает ошибку VK с кодом (`wall.getReposts[15]: …`).
+- checkRepostViaVK и refreshReposts переведены на user-токен; в refreshReposts любая ошибка по посту прерывает операцию ДО записи — колонка has_reposted больше не затирается при сбоях VK.
+- RefreshRepostsButton: понятные тексты для REPOST_TOKEN_REQUIRED и сырых ошибок VK.
+- docs/google-sheets-setup.md, шаг 6 переписан: получение user-токена через Standalone-приложение (oauth.vk.com/authorize, scope=wall), свойства VK_USER_TOKEN / VK_OWNER_ID / ADMIN_PASSWORD_HASH, роль сервисного токена (только groups.isMember).
+
+### Изменённые файлы
+
+- `apps-script/Code.gs`
+- `src/components/admin/RefreshRepostsButton.tsx`
+- `docs/google-sheets-setup.md`, `.agent/CHANGELOG.md`
+
+### Проверки
+
+- Запускаются ниже (lint / tsc / build).
+
+### Требует внимания
+
+- Владельцу: получить user-токен (Standalone-приложение, scope=wall) и добавить свойство VK_USER_TOKEN; переиздать веб-приложение. До этого кнопка/проверка честно ответят REPOST_TOKEN_REQUIRED вместо нулей.
+
 ## 2026-08-24 — Правка: refreshReposts проверяет и перезаписывает все записи
 
 **Ветка:** `ai/fix-delta-reposts-notifications`

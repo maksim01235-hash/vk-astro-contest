@@ -23,7 +23,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   ADMIN_HASH_NOT_CONFIGURED:
     'Задайте свойство ADMIN_PASSWORD_HASH в Apps Script (тот же хеш, что в NEXT_PUBLIC_ADMIN_PASSWORD_HASH)',
   REPOST_CHECK_NOT_CONFIGURED:
-    'Проверка репостов не настроена: заданы ли VK_SERVICE_TOKEN и VK_OWNER_ID в свойствах скрипта?',
+    'Проверка репостов не настроена: задайте VK_OWNER_ID и VK_USER_TOKEN в свойствах скрипта',
+  REPOST_TOKEN_REQUIRED:
+    'Сервисный токен не подходит для wall.getReposts (VK отдаёт error 15). Добавьте свойство VK_USER_TOKEN — user-токен со scope=wall; как получить: docs/google-sheets-setup.md, шаг 6',
 };
 
 export function RefreshRepostsButton() {

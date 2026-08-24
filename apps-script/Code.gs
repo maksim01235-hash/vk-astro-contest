@@ -932,32 +932,68 @@ function syncOffline(body) {
 // VK repost check
 // ============================================================
 
-function checkRepostViaVK(vkId, postId) {
+/**
+ * Токен для wall-методов VK.
+ *
+ * ВАЖНО: wall.getReposts требует права доступа wall, которого у СЕРВИСНОГО
+ * токена нет — VK отвечает error 15 «Access denied». Нужен USER-токен:
+ * через Standalone-приложение получить по ссылке вида
+ * https://oauth.vk.com/authorize?client_id=<ID_STANDALONE>&display=page&scope=wall&response_type=token&v=5.199
+ * и сохранить в Script Properties как VK_USER_TOKEN.
+ *
+ * Ошибки:
+ *  - REPOST_TOKEN_REQUIRED — задан только сервисный токен;
+ *  - REPOST_CHECK_NOT_CONFIGURED — не заданы токены и/или VK_OWNER_ID.
+ */
+function getWallToken() {
   var props = PropertiesService.getScriptProperties();
-  var token = props.getProperty('VK_SERVICE_TOKEN');
   var ownerId = props.getProperty('VK_OWNER_ID');
+  var userToken = props.getProperty('VK_USER_TOKEN');
+  var serviceToken = props.getProperty('VK_SERVICE_TOKEN');
 
-  // Единый различимый маркер «проверка не настроена»: клиент пишет событие
-  // repost_check_unconfigured вместо немого false.
-  if (!token || !ownerId) throw new Error('REPOST_CHECK_NOT_CONFIGURED');
+  if (!ownerId) throw new Error('REPOST_CHECK_NOT_CONFIGURED');
+  if (!userToken && !serviceToken) throw new Error('REPOST_CHECK_NOT_CONFIGURED');
+  // Сервисный токен сознательно НЕ используем как запасной: он гарантированно
+  // даёт error 15, а молчаливые нули уже приводили к затиранию has_reposted.
+  if (!userToken) throw new Error('REPOST_TOKEN_REQUIRED');
 
+  return { token: userToken, ownerId: ownerId };
+}
+
+/**
+ * Один вызов wall.getReposts → множество id репостнувших.
+ * Ошибка VK прокидывается наверх с кодом:
+ * 'wall.getReposts[15]: Access denied…' — видна в тосте админки и логах.
+ */
+function fetchReposters(ownerId, token, postId) {
   var response = UrlFetchApp.fetch(
     'https://api.vk.com/method/wall.getReposts?' + serializeParams({
       owner_id: ownerId,
       post_id: postId,
-      count: 100,
+      count: 1000,
       v: '5.199',
       access_token: token,
     }),
   );
 
   var data = JSON.parse(response.getContentText());
-  if (data.error) throw new Error(data.error.error_msg);
+  if (data.error) {
+    throw new Error(
+      'wall.getReposts[' + data.error.error_code + ']: ' + data.error.error_msg,
+    );
+  }
 
-  var reposts = data.response && data.response.items ? data.response.items : [];
-  return reposts.some(function(item) {
-    return String(item.from_id) === String(vkId);
+  var ids = {};
+  ((data.response && data.response.items) || []).forEach(function(item) {
+    ids[String(item.from_id)] = true;
   });
+  return ids;
+}
+
+function checkRepostViaVK(vkId, postId) {
+  var config = getWallToken();
+  var ids = fetchReposters(config.ownerId, config.token, postId);
+  return ids[String(vkId)] === true;
 }
 
 function serializeParams(obj) {
@@ -984,7 +1020,12 @@ function serializeParams(obj) {
  * Ошибки:
  *  - ADMIN_HASH_NOT_CONFIGURED — задайте свойство ADMIN_PASSWORD_HASH;
  *  - FORBIDDEN — неверный пароль;
- *  - REPOST_CHECK_NOT_CONFIGURED — не заданы VK_SERVICE_TOKEN/VK_OWNER_ID.
+ *  - REPOST_TOKEN_REQUIRED — задан только сервисный токен (нужен VK_USER_TOKEN);
+ *  - REPOST_CHECK_NOT_CONFIGURED — не заданы VK_OWNER_ID и/или токены;
+ *  - wall.getReposts[код] — ошибка VK API.
+ *
+ * БЕЗОПАСНОСТЬ ДАННЫХ: если хотя бы один пост не удалось проверить, операция
+ * прерывается ДО записи — has_reposted не затирается нулями.
  *
  * @param {string} passwordHash - hex SHA-256 пароля (считается на клиенте)
  * @returns {Object} { checked, updated, posts: [{post_id, reposts}] },
@@ -999,9 +1040,7 @@ function refreshReposts(passwordHash) {
     throw new Error('FORBIDDEN');
   }
 
-  var token = props.getProperty('VK_SERVICE_TOKEN');
-  var ownerId = props.getProperty('VK_OWNER_ID');
-  if (!token || !ownerId) throw new Error('REPOST_CHECK_NOT_CONFIGURED');
+  var config = getWallToken();
 
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -1017,31 +1056,12 @@ function refreshReposts(passwordHash) {
     });
 
     // Репостнувшие по каждому посту: один вызов wall.getReposts на пост.
+    // Любая ошибка VK прерывает операцию ДО перезаписи колонки (fetchReposters
+    // бросает исключение) — данные Answers остаются нетронутыми.
     var repostersByPost = {};
     var postsSummary = [];
     Object.keys(posts).forEach(function(postId) {
-      var ids = {};
-      try {
-        var response = UrlFetchApp.fetch(
-          'https://api.vk.com/method/wall.getReposts?' + serializeParams({
-            owner_id: ownerId,
-            post_id: postId,
-            count: 1000,
-            v: '5.199',
-            access_token: token,
-          }),
-        );
-        var data = JSON.parse(response.getContentText());
-        if (data.error) {
-          Logger.log('wall.getReposts(' + postId + ') error: ' + data.error.error_msg);
-        } else {
-          ((data.response && data.response.items) || []).forEach(function(item) {
-            ids[String(item.from_id)] = true;
-          });
-        }
-      } catch (error) {
-        Logger.log('wall.getReposts(' + postId + ') failed: ' + String(error));
-      }
+      var ids = fetchReposters(config.ownerId, config.token, postId);
       repostersByPost[postId] = ids;
       postsSummary.push({ post_id: postId, reposts: Object.keys(ids).length });
     });
