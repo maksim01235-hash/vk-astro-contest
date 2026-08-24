@@ -42,7 +42,7 @@ export function RefreshRepostsButton() {
       const postsDetail = summary.posts
         .map((item) => `${item.post_id}: ${item.reposts}`)
         .join(', ');
-      toast.success(`Репосты перепроверены: обновлено ${summary.updated} из ${summary.checked}. Репостов по постам — ${postsDetail || 'нет постов'}`);
+      toast.success(`Проверено записей: ${summary.checked} (изменилось ${summary.updated}). Репостов по постам — ${postsDetail || 'нет постов'}`);
       setOpen(false);
       setPassword('');
     } catch (error) {

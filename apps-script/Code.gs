@@ -971,9 +971,10 @@ function serializeParams(obj) {
 // ============================================================
 
 /**
- * Пересчитывает Answers.has_reposted по факту: пользователь мог репостнуть
+ * Пересчитывает репосты для КАЖДОЙ записи Answers и перезаписывает всю
+ * колонку has_reposted (один батч setValues): пользователь мог репостнуть
  * позже отправки ответа. Для каждого уникального post_id из Cards делается
- * один вызов wall.getReposts, затем обновляются ТОЛЬКО изменившиеся ячейки.
+ * один вызов wall.getReposts.
  *
  * Доступ: клиент шлёт SHA-256 хеш пароля админки; сервер сравнивает его со
  * Script Property ADMIN_PASSWORD_HASH (тот же хеш, что в
@@ -986,7 +987,9 @@ function serializeParams(obj) {
  *  - REPOST_CHECK_NOT_CONFIGURED — не заданы VK_SERVICE_TOKEN/VK_OWNER_ID.
  *
  * @param {string} passwordHash - hex SHA-256 пароля (считается на клиенте)
- * @returns {Object} { checked, updated, posts: [{post_id, reposts}] }
+ * @returns {Object} { checked, updated, posts: [{post_id, reposts}] },
+ *   где checked — всего записей проверено/перезаписано,
+ *       updated — сколько значений фактически изменилось (диагностика).
  */
 function refreshReposts(passwordHash) {
   var props = PropertiesService.getScriptProperties();
@@ -1043,7 +1046,7 @@ function refreshReposts(passwordHash) {
       postsSummary.push({ post_id: postId, reposts: Object.keys(ids).length });
     });
 
-    // Точечное обновление только изменившихся ячеек has_reposted.
+    // Читаем Answers целиком (нужны индексы строк и текущие значения).
     var sheet = getSheet(SHEET_ANSWERS);
     var data = sheet.getDataRange().getValues();
     if (data.length < 2) return { checked: 0, updated: 0, posts: postsSummary };
@@ -1056,21 +1059,27 @@ function refreshReposts(passwordHash) {
       throw new Error('Answers sheet has unexpected columns');
     }
 
-    var updated = 0;
+    // Полная перепроверка: вычисляем has_reposted для каждой строки и
+    // перезаписываем ВСЮ колонку одним батчем setValues (требование владельца —
+    // проверяются все записи, а не только расходящиеся с фактом).
+    var total = data.length - 1;
+    var columnValues = [];
+    var changed = 0;
+
     for (var i = 1; i < data.length; i++) {
       var postId = cardToPost[String(data[i][cardCol])];
       var expected = postId ? repostersByPost[postId][String(data[i][vkCol])] === true : false;
 
       var current = data[i][repostCol];
       var currentBool = current === true || current === 'TRUE' || current === 'true';
+      if (currentBool !== expected) changed += 1;
 
-      if (currentBool !== expected) {
-        sheet.getRange(i + 1, repostCol + 1).setValue(expected);
-        updated += 1;
-      }
+      columnValues.push([expected]);
     }
 
-    return { checked: data.length - 1, updated: updated, posts: postsSummary };
+    sheet.getRange(2, repostCol + 1, total, 1).setValues(columnValues);
+
+    return { checked: total, updated: changed, posts: postsSummary };
   } finally {
     lock.releaseLock();
   }
