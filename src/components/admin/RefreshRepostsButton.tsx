@@ -44,7 +44,10 @@ export function RefreshRepostsButton() {
       const postsDetail = summary.posts
         .map((item) => `${item.post_id}: ${item.reposts}`)
         .join(', ');
-      toast.success(`Проверено записей: ${summary.checked} (изменилось ${summary.updated}). Репостов по постам — ${postsDetail || 'нет постов'}`);
+      const skippedNote = summary.skippedUnknown > 0
+        ? `, пропущено без карточки: ${summary.skippedUnknown}`
+        : '';
+      toast.success(`Проверено записей: ${summary.checked}, изменено ${summary.updated}${skippedNote}. Репостов по постам — ${postsDetail || 'нет постов'}`);
       setOpen(false);
       setPassword('');
     } catch (error) {

@@ -1012,10 +1012,14 @@ function serializeParams(obj) {
 // ============================================================
 
 /**
- * Пересчитывает репосты для КАЖДОЙ записи Answers и перезаписывает всю
- * колонку has_reposted (один батч setValues): пользователь мог репостнуть
- * позже отправки ответа. Для каждого уникального post_id из Cards делается
- * один вызов wall.getReposts.
+ * Пересчитывает репосты и перезаписывает has_reposted для записей Answers,
+ * у которых card_id найден в Cards (с непустым post_id). Для каждого
+ * уникального поста делается один вызов wall.getReposts.
+ *
+ * «Сиротские» строки (card_id нет в Cards / карточка без post_id) решением
+ * владельца НЕ перезаписываются вообще — иначе они получали бы ложный false
+ * при батч-записи всей колонки. Запись идёт батчами setValues по
+ * непрерывным диапазонам между сиротами.
  *
  * Доступ: клиент шлёт SHA-256 хеш пароля админки; сервер сравнивает его со
  * Script Property ADMIN_PASSWORD_HASH (тот же хеш, что в
@@ -1033,9 +1037,10 @@ function serializeParams(obj) {
  * прерывается ДО записи — has_reposted не затирается нулями.
  *
  * @param {string} passwordHash - hex SHA-256 пароля (считается на клиенте)
- * @returns {Object} { checked, updated, posts: [{post_id, reposts}] },
- *   где checked — всего записей проверено/перезаписано,
- *       updated — сколько значений фактически изменилось (диагностика).
+ * @returns {Object} { checked, updated, skippedUnknown, posts },
+ *   где checked — всего записей просмотрено,
+ *       updated — сколько значений фактически изменилось,
+ *       skippedUnknown — сиротских строк пропущено без записи.
  */
 function refreshReposts(passwordHash) {
   var props = PropertiesService.getScriptProperties();
@@ -1074,7 +1079,7 @@ function refreshReposts(passwordHash) {
     // Читаем Answers целиком (нужны индексы строк и текущие значения).
     var sheet = getSheet(SHEET_ANSWERS);
     var data = sheet.getDataRange().getValues();
-    if (data.length < 2) return { checked: 0, updated: 0, posts: postsSummary };
+    if (data.length < 2) return { checked: 0, updated: 0, skippedUnknown: 0, posts: postsSummary };
 
     var headers = data[0];
     var vkCol = headers.indexOf('vk_id');
@@ -1084,27 +1089,45 @@ function refreshReposts(passwordHash) {
       throw new Error('Answers sheet has unexpected columns');
     }
 
-    // Полная перепроверка: вычисляем has_reposted для каждой строки и
-    // перезаписываем ВСЮ колонку одним батчем setValues (требование владельца —
-    // проверяются все записи, а не только расходящиеся с фактом).
+    // Перепроверка с пропуском «сирот»: строки без известного card_id→post_id
+    // не перезаписываются (см. JSDoc). Запись — батчами setValues по
+    // непрерывным диапазонам между сиротами.
     var total = data.length - 1;
-    var columnValues = [];
     var changed = 0;
+    var skippedUnknown = 0;
+
+    var runStartRow = -1;   // строка листа, с которой открыт диапазон записи
+    var runValues = [];
+
+    var flushRun = function() {
+      if (runStartRow !== -1 && runValues.length > 0) {
+        sheet.getRange(runStartRow, repostCol + 1, runValues.length, 1).setValues(runValues);
+      }
+      runStartRow = -1;
+      runValues = [];
+    };
 
     for (var i = 1; i < data.length; i++) {
       var postId = cardToPost[String(data[i][cardCol])];
-      var expected = postId ? repostersByPost[postId][String(data[i][vkCol])] === true : false;
 
+      if (!postId) {
+        // Сирота: значение оставляем как есть.
+        skippedUnknown += 1;
+        flushRun(); // закрыть открытый до этой строки диапазон
+        continue;
+      }
+
+      var expected = repostersByPost[postId][String(data[i][vkCol])] === true;
       var current = data[i][repostCol];
       var currentBool = current === true || current === 'TRUE' || current === 'true';
       if (currentBool !== expected) changed += 1;
 
-      columnValues.push([expected]);
+      if (runStartRow === -1) runStartRow = i + 1;
+      runValues.push([expected]);
     }
+    flushRun();
 
-    sheet.getRange(2, repostCol + 1, total, 1).setValues(columnValues);
-
-    return { checked: total, updated: changed, posts: postsSummary };
+    return { checked: total, updated: changed, skippedUnknown: skippedUnknown, posts: postsSummary };
   } finally {
     lock.releaseLock();
   }

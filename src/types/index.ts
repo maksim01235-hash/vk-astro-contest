@@ -215,10 +215,12 @@ export type CardStat = {
 
 /** Сводка полной перепроверки репостов (refreshReposts). */
 export interface RepostRefreshSummary {
-  /** Сколько строк Answers проверено. */
+  /** Сколько строк Answers просмотрено. */
   checked: number;
-  /** Сколько ячеек has_reposted изменено. */
+  /** Сколько ячеек has_reposted фактически изменено. */
   updated: number;
+  /** Сиротских строк пропущено (card_id нет в Cards или у карточки нет post_id). */
+  skippedUnknown: number;
   /** По каждому посту: сколько фактических репостов найдено. */
   posts: Array<{ post_id: string; reposts: number }>;
 }
